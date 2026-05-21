@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Marketplace{% endblock %}
+{% block page_title %}Marketplace{% endblock %}
+{% block page_subtitle %}Sellers & Leaderboard Management{% endblock %}
+
+{% block content %}
+
+<div class="section">
+  <div class="section-header">
+    <div class="section-title">📊 Leaderboard</div>
+    <form method="POST" action="/reset_leaderboard" onsubmit="return confirm('Reset entire leaderboard?')">
+      <button type="submit" class="btn btn-danger">🔄 Reset All</button>
+    </form>
+  </div>
+  <div class="table-wrap">
+    <div class="table-row header" style="grid-template-columns:48px 1fr 80px 80px 80px 120px 80px">
+      <div>Rank</div><div>Seller</div><div>Deals</div><div>👍</div><div>👎</div><div>Ratio</div><div></div>
+    </div>
+    {% if leaderboard %}
+      {% for s in leaderboard %}
+      <div class="table-row" style="grid-template-columns:48px 1fr 80px 80px 80px 120px 80px">
+        <div style="font-family:'Cinzel',serif;text-align:center;color:var(--gold)">
+          {% if s.rank == 1 %}🥇{% elif s.rank == 2 %}🥈{% elif s.rank == 3 %}🥉{% else %}#{{ s.rank }}{% endif %}
+        </div>
+        <div>{{ s.username }}</div>
+        <div style="color:var(--text-dim);text-align:center">{{ s.total }}</div>
+        <div style="color:var(--green);text-align:center">{{ s.positive }}</div>
+        <div style="color:var(--red);text-align:center">{{ s.negative }}</div>
+        <div>
+          <span style="color:var(--gold);font-size:13px">{{ s.ratio }}%</span>
+          <div class="ratio-bar-wrap"><div class="ratio-bar" style="width:{{ s.ratio }}%"></div></div>
+        </div>
+        <div>
+          <form method="POST" action="/delete_seller/{{ s.id }}" onsubmit="return confirm('Delete this seller?')">
+            <button type="submit" class="btn btn-danger">Delete</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">NO DATA YET</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

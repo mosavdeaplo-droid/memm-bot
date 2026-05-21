@@ -13,7 +13,7 @@ import re
 # ═══════════════════════════════════════════════════════════════
 #  CONFIG
 # ═══════════════════════════════════════════════════════════════
-GIF_URL  = "https://cdn.discordapp.com/attachments/1504256416569884788/1505797501830299658/mem.gif?ex=6a0beeb4&is=6a0a9d34&hm=585f6fd768b4a07d864ca2ba8f08803482445772c4159fd9e2aaead05af4dad8&"
+GIF_URL  = "https://cdn.discordapp.com/attachments/1504271389656486049/1506983848229998644/mem.gif?ex=6a103f93&is=6a0eee13&hm=e317fb999d07c38c7f833503be07946596fab23962f8ad1a640b5c58&"
 LOGO_URL = "https://cdn.discordapp.com/attachments/1504256416569884788/1505797502622896198/Geometric_Monogram_Logo_for_MEM.png?ex=6a0beeb4&is=6a0a9d34&hm=24492cc4843e4969bea21c79aff736ec0c1a36dc26778ffff54087fd2291a3e0&"
 
 EMBED_COLOR  = 0x1a2332
@@ -36,6 +36,7 @@ TICKET_CATEGORY_ID = 1505922835359596644
 STAFF_ROLE_ID    = 1504374917360128040
 MEMBER_ROLE_ID   = 1504383155921092808
 SECURITY_ROLE_ID = 1505133078111191142
+ARC_ROLE_ID      = 1506219518567911566
 
 LANGUAGE_ROLES = {
     "English": 1506219132037763092,
@@ -864,9 +865,10 @@ async def on_message(message: discord.Message):
             timestamp=datetime.now(timezone.utc)
         )
         embed.set_thumbnail(url=author.display_avatar.url)
+        embed.set_image(url=GIF_URL)
         embed.add_field(
             name="Posted By",
-            value=f"{author.mention} | <@&{STAFF_ROLE_ID}> | Community",
+            value=f"{author.mention} | <@&{ARC_ROLE_ID}> | Community",
             inline=False
         )
         embed.set_footer(text=FOOTER_TEXT)

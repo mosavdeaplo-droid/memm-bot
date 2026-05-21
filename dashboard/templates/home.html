@@ -2,86 +2,39 @@
 {% block title %}Home{% endblock %}
 {% block page_title %}Home{% endblock %}
 {% block page_subtitle %}Live Server Statistics{% endblock %}
-
 {% block content %}
-
 <div class="stats-grid">
-  <div class="stat-card">
-    <div class="stat-icon">🎫</div>
-    <div class="stat-value">{{ stats.tickets }}</div>
-    <div class="stat-label">Total Tickets</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-icon">📦</div>
-    <div class="stat-value">{{ stats.orders }}</div>
-    <div class="stat-label">Total Deals</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-icon">⚠️</div>
-    <div class="stat-value">{{ stats.warnings }}</div>
-    <div class="stat-label">Total Warnings</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-icon">📜</div>
-    <div class="stat-value">{{ stats.logs }}</div>
-    <div class="stat-label">Total Logs</div>
-  </div>
+  <div class="stat-card"><div class="stat-icon">🎫</div><div class="stat-value">{{ stats.tickets }}</div><div class="stat-label">Total Tickets</div></div>
+  <div class="stat-card"><div class="stat-icon">📦</div><div class="stat-value">{{ stats.orders }}</div><div class="stat-label">Total Deals</div></div>
+  <div class="stat-card"><div class="stat-icon">⚠️</div><div class="stat-value">{{ stats.warnings }}</div><div class="stat-label">Total Warnings</div></div>
+  <div class="stat-card"><div class="stat-icon">📜</div><div class="stat-value">{{ stats.logs }}</div><div class="stat-label">Total Logs</div></div>
 </div>
-
 <div class="grid-2">
-  <!-- Top Sellers -->
   <div class="section">
-    <div class="section-header">
-      <div class="section-title">🏆 Top Sellers</div>
-      <a href="/marketplace" class="btn btn-gold">View All</a>
-    </div>
+    <div class="section-header"><div class="section-title">🏆 Top Sellers</div><a href="/marketplace" class="btn btn-gold">View All</a></div>
     <div class="table-wrap">
-      <div class="table-row header" style="grid-template-columns:40px 1fr 60px 80px">
-        <div>#</div><div>Seller</div><div>Deals</div><div>Ratio</div>
+      <div class="table-row header" style="grid-template-columns:36px 1fr 56px 80px"><div>#</div><div>Seller</div><div>Deals</div><div>Ratio</div></div>
+      {% if top_sellers %}{% for s in top_sellers %}
+      <div class="table-row" style="grid-template-columns:36px 1fr 56px 80px">
+        <div style="font-family:'Cinzel',serif;color:var(--gold)">{% if loop.index==1 %}🥇{% elif loop.index==2 %}🥈{% else %}🥉{% endif %}</div>
+        <div>{{ s.username }}</div><div style="color:var(--text-dim)">{{ s.total }}</div>
+        <div><span style="color:var(--gold);font-size:12px">{{ s.ratio }}%</span><div class="ratio-bar-wrap"><div class="ratio-bar" style="width:{{ s.ratio }}%"></div></div></div>
       </div>
-      {% if top_sellers %}
-        {% for s in top_sellers %}
-        <div class="table-row" style="grid-template-columns:40px 1fr 60px 80px">
-          <div style="font-family:'Cinzel',serif;color:var(--gold)">
-            {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% else %}🥉{% endif %}
-          </div>
-          <div>{{ s.username }}</div>
-          <div style="color:var(--text-dim)">{{ s.total }}</div>
-          <div>
-            <span style="color:var(--gold);font-size:13px">{{ s.ratio }}%</span>
-            <div class="ratio-bar-wrap"><div class="ratio-bar" style="width:{{ s.ratio }}%"></div></div>
-          </div>
-        </div>
-        {% endfor %}
-      {% else %}
-        <div class="empty-state">NO DATA YET</div>
-      {% endif %}
+      {% endfor %}{% else %}<div class="empty-state">NO DATA YET</div>{% endif %}
     </div>
   </div>
-
-  <!-- Recent Logs -->
   <div class="section">
-    <div class="section-header">
-      <div class="section-title">📜 Recent Activity</div>
-      <a href="/logs" class="btn btn-gold">View All</a>
-    </div>
+    <div class="section-header"><div class="section-title">📜 Recent Activity</div><a href="/logs" class="btn btn-gold">View All</a></div>
     <div class="table-wrap">
-      <div class="table-row header" style="grid-template-columns:80px 1fr 80px">
-        <div>Type</div><div>Event</div><div>Time</div>
+      <div class="table-row header" style="grid-template-columns:80px 1fr 80px"><div>Type</div><div>Event</div><div>Time</div></div>
+      {% if recent_logs %}{% for l in recent_logs %}
+      <div class="table-row" style="grid-template-columns:80px 1fr 80px">
+        <div><span class="badge badge-{{ l.type }}">{{ l.type }}</span></div>
+        <div style="font-size:12px">{{ l.title }}</div>
+        <div style="font-size:10px;color:var(--text-dim)">{{ l.time }}</div>
       </div>
-      {% if recent_logs %}
-        {% for l in recent_logs %}
-        <div class="table-row" style="grid-template-columns:80px 1fr 80px">
-          <div><span class="badge badge-{{ l.type }}">{{ l.type }}</span></div>
-          <div style="font-size:13px">{{ l.title }}</div>
-          <div style="font-size:11px;color:var(--text-dim)">{{ l.time }}</div>
-        </div>
-        {% endfor %}
-      {% else %}
-        <div class="empty-state">NO LOGS YET</div>
-      {% endif %}
+      {% endfor %}{% else %}<div class="empty-state">NO LOGS YET</div>{% endif %}
     </div>
   </div>
 </div>
-
 {% endblock %}

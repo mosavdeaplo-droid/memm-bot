@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block page_title %}Bot Settings{% endblock %}
+{% block page_subtitle %}Configure Bot Behavior{% endblock %}
+
+{% block content %}
+
+<div class="section">
+  <div class="section-header">
+    <div class="section-title">⚙️ General Settings</div>
+  </div>
+  <div class="card">
+    <form method="POST" action="/save_settings">
+      <div class="form-group">
+        <label class="form-label">Footer Text</label>
+        <input type="text" name="footer" class="form-input" value="{{ config.get('footer', 'Powered by MEM Development | Deaplo') }}">
+      </div>
+      <button type="submit" class="btn btn-gold">💾 Save Changes</button>
+    </form>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-header">
+    <div class="section-title">📋 Bot Info</div>
+  </div>
+  <div class="card">
+    <div class="table-wrap" style="border:none">
+      <div class="table-row" style="grid-template-columns:1fr 1fr;border-bottom:1px solid var(--border)">
+        <div style="color:var(--text-dim);font-size:12px;letter-spacing:2px">BOT NAME</div>
+        <div>MEM Store Bot</div>
+      </div>
+      <div class="table-row" style="grid-template-columns:1fr 1fr;border-bottom:1px solid var(--border)">
+        <div style="color:var(--text-dim);font-size:12px;letter-spacing:2px">DEVELOPER</div>
+        <div>Deaplo</div>
+      </div>
+      <div class="table-row" style="grid-template-columns:1fr 1fr">
+        <div style="color:var(--text-dim);font-size:12px;letter-spacing:2px">VERSION</div>
+        <div>1.0.0</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

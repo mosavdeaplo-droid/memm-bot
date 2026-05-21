@@ -80,9 +80,9 @@ def home():
         "orders":   db["leaderboard"].count_documents({}),
         "warnings": db["warnings"].count_documents({}),
         "logs":     db["logs"].count_documents({}),
+        "members":  db["members"].count_documents({}) if "members" in db.list_collection_names() else 0,
     }
 
-    # Top sellers
     top = list(db["leaderboard"].find().sort("positive", -1).limit(3))
     top_sellers = []
     for s in top:
@@ -96,7 +96,6 @@ def home():
             "ratio":    ratio,
         })
 
-    # Recent logs
     recent_logs = list(db["logs"].find().sort("timestamp", -1).limit(5))
     for l in recent_logs:
         l["time"] = fmt_time(l.get("timestamp"))
@@ -112,9 +111,9 @@ def tickets():
     if not logged_in(): return redirect(url_for("login"))
 
     tickets_raw = list(db["tickets"].find().sort("opened_at", -1).limit(50))
-    tickets = []
+    tickets_list = []
     for t in tickets_raw:
-        tickets.append({
+        tickets_list.append({
             "id":       str(t["_id"]),
             "username": get_username(t.get("user_id")),
             "user_id":  t.get("user_id"),
@@ -130,7 +129,31 @@ def tickets():
         "partner": db["tickets"].count_documents({"type": "Partner"}),
     }
 
-    return render_template("tickets.html", tickets=tickets, stats=stats)
+    config = db["config"].find_one({"key": "ticket_config"}) or {}
+
+    return render_template("tickets.html", tickets=tickets_list, stats=stats, config=config)
+
+@app.route("/save_ticket_config", methods=["POST"])
+def save_ticket_config():
+    if not logged_in(): return redirect(url_for("login"))
+    data = {
+        "title":       request.form.get("title", "🎫 MEM Store | Ticket Center"),
+        "description": request.form.get("description", ""),
+        "footer":      request.form.get("footer", "Powered by MEM Development | Deaplo"),
+        "category_id": request.form.get("category_id", ""),
+        "log_channel": request.form.get("log_channel", ""),
+    }
+    db["config"].update_one({"key": "ticket_config"}, {"$set": data}, upsert=True)
+    return redirect(url_for("tickets"))
+
+@app.route("/delete_ticket/<ticket_id>", methods=["POST"])
+def delete_ticket(ticket_id):
+    if not logged_in(): return redirect(url_for("login"))
+    try:
+        db["tickets"].delete_one({"_id": ObjectId(ticket_id)})
+    except Exception:
+        pass
+    return redirect(url_for("tickets"))
 
 # ─────────────────────────────────────────
 #  MARKETPLACE
@@ -156,7 +179,19 @@ def marketplace():
             "ratio":     ratio,
         })
 
-    return render_template("marketplace.html", leaderboard=leaderboard)
+    # Recent orders from logs
+    orders = list(db["logs"].find({"type": "order"}).sort("timestamp", -1).limit(10))
+    for o in orders:
+        o["time"] = fmt_time(o.get("timestamp"))
+        o.pop("_id", None)
+
+    # Feedback logs
+    feedback = list(db["logs"].find({"title": {"$regex": "Feedback", "$options": "i"}}).sort("timestamp", -1).limit(10))
+    for f in feedback:
+        f["time"] = fmt_time(f.get("timestamp"))
+        f.pop("_id", None)
+
+    return render_template("marketplace.html", leaderboard=leaderboard, orders=orders, feedback=feedback)
 
 @app.route("/reset_leaderboard", methods=["POST"])
 def reset_leaderboard():
@@ -195,9 +230,19 @@ def moderation():
 
     stats = {
         "total":   db["warnings"].count_documents({}),
+        "bans":    db["logs"].count_documents({"title": {"$regex": "Ban", "$options": "i"}}),
+        "kicks":   db["logs"].count_documents({"title": {"$regex": "Kick", "$options": "i"}}),
+        "timeouts":db["logs"].count_documents({"title": {"$regex": "Timeout", "$options": "i"}}),
     }
 
-    return render_template("moderation.html", warns=warns, stats=stats)
+    # Blacklist
+    blacklist = list(db["blacklist"].find()) if "blacklist" in db.list_collection_names() else []
+    for b in blacklist:
+        b["id"] = str(b["_id"])
+        b["username"] = get_username(b.get("user_id"))
+        b.pop("_id", None)
+
+    return render_template("moderation.html", warns=warns, stats=stats, blacklist=blacklist)
 
 @app.route("/delete_warning/<warning_id>", methods=["POST"])
 def delete_warning(warning_id):
@@ -212,6 +257,31 @@ def delete_warning(warning_id):
 def clear_user_warnings(user_id):
     if not logged_in(): return redirect(url_for("login"))
     db["warnings"].delete_many({"user_id": user_id})
+    return redirect(url_for("moderation"))
+
+@app.route("/add_blacklist", methods=["POST"])
+def add_blacklist():
+    if not logged_in(): return redirect(url_for("login"))
+    user_id = request.form.get("user_id", "").strip()
+    reason  = request.form.get("reason", "No reason")
+    if user_id:
+        try:
+            db["blacklist"].update_one(
+                {"user_id": int(user_id)},
+                {"$set": {"user_id": int(user_id), "reason": reason, "added_at": datetime.now(timezone.utc)}},
+                upsert=True
+            )
+        except Exception:
+            pass
+    return redirect(url_for("moderation"))
+
+@app.route("/remove_blacklist/<entry_id>", methods=["POST"])
+def remove_blacklist(entry_id):
+    if not logged_in(): return redirect(url_for("login"))
+    try:
+        db["blacklist"].delete_one({"_id": ObjectId(entry_id)})
+    except Exception:
+        pass
     return redirect(url_for("moderation"))
 
 # ─────────────────────────────────────────
@@ -261,8 +331,32 @@ def roles():
         "PUBG Mobile": 1506219627246649455,
         "PUBG Steam":  1506219763171463209,
     })
+    auto_roles = config.get("auto_roles", [])
 
-    return render_template("roles.html", language_roles=language_roles, game_roles=game_roles)
+    return render_template("roles.html",
+        language_roles=language_roles,
+        game_roles=game_roles,
+        auto_roles=auto_roles
+    )
+
+@app.route("/save_roles", methods=["POST"])
+def save_roles():
+    if not logged_in(): return redirect(url_for("login"))
+    # Parse language roles
+    lang_names = request.form.getlist("lang_name")
+    lang_ids   = request.form.getlist("lang_id")
+    language_roles = {n: int(i) for n, i in zip(lang_names, lang_ids) if n and i}
+    # Parse game roles
+    game_names = request.form.getlist("game_name")
+    game_ids   = request.form.getlist("game_id")
+    game_roles = {n: int(i) for n, i in zip(game_names, game_ids) if n and i}
+
+    db["config"].update_one(
+        {"key": "roles_config"},
+        {"$set": {"language_roles": language_roles, "game_roles": game_roles}},
+        upsert=True
+    )
+    return redirect(url_for("roles"))
 
 # ─────────────────────────────────────────
 #  WELCOME
@@ -272,20 +366,84 @@ def welcome():
     if not logged_in(): return redirect(url_for("login"))
 
     config = db["config"].find_one({"key": "welcome_config"}) or {}
-    welcome_msg = config.get("message", "We hope you have a great time.")
 
-    return render_template("welcome.html", welcome_msg=welcome_msg)
+    return render_template("welcome.html", config=config)
 
 @app.route("/save_welcome", methods=["POST"])
 def save_welcome():
     if not logged_in(): return redirect(url_for("login"))
-    msg = request.form.get("message", "")
-    db["config"].update_one(
-        {"key": "welcome_config"},
-        {"$set": {"message": msg}},
-        upsert=True
-    )
+    data = {
+        "message":         request.form.get("message", "We hope you have a great time."),
+        "welcome_channel": request.form.get("welcome_channel", ""),
+        "member_role":     request.form.get("member_role", ""),
+        "auto_dm":         request.form.get("auto_dm", ""),
+        "leave_message":   request.form.get("leave_message", ""),
+    }
+    db["config"].update_one({"key": "welcome_config"}, {"$set": data}, upsert=True)
     return redirect(url_for("welcome"))
+
+# ─────────────────────────────────────────
+#  SECURITY
+# ─────────────────────────────────────────
+@app.route("/security")
+def security():
+    if not logged_in(): return redirect(url_for("login"))
+
+    config = db["config"].find_one({"key": "security_config"}) or {}
+    return render_template("security.html", config=config)
+
+@app.route("/save_security", methods=["POST"])
+def save_security():
+    if not logged_in(): return redirect(url_for("login"))
+    data = {
+        "anti_raid":    "anti_raid"    in request.form,
+        "anti_bot":     "anti_bot"     in request.form,
+        "anti_scam":    "anti_scam"    in request.form,
+        "anti_mention": "anti_mention" in request.form,
+        "anti_spam":    "anti_spam"    in request.form,
+        "anti_links":   "anti_links"   in request.form,
+        "mention_limit": int(request.form.get("mention_limit", 5)),
+        "spam_limit":    int(request.form.get("spam_limit", 5)),
+        "spam_window":   int(request.form.get("spam_window", 5)),
+    }
+    db["config"].update_one({"key": "security_config"}, {"$set": data}, upsert=True)
+    return redirect(url_for("security"))
+
+# ─────────────────────────────────────────
+#  ANALYTICS
+# ─────────────────────────────────────────
+@app.route("/analytics")
+def analytics():
+    if not logged_in(): return redirect(url_for("login"))
+
+    # Message stats by type
+    log_types = ["moderation", "ticket", "member", "message", "order", "automod", "general"]
+    type_counts = {t: db["logs"].count_documents({"type": t}) for t in log_types}
+
+    # Top sellers
+    top_sellers = list(db["leaderboard"].find().sort("positive", -1).limit(10))
+    for s in top_sellers:
+        s["username"] = get_username(s.get("seller_id"))
+        total = s.get("total", 0)
+        positive = s.get("positive", 0)
+        s["ratio"] = round((positive / total) * 100) if total > 0 else 0
+        s.pop("_id", None)
+
+    stats = {
+        "tickets":    db["tickets"].count_documents({}),
+        "orders":     db["leaderboard"].count_documents({}),
+        "warnings":   db["warnings"].count_documents({}),
+        "logs":       db["logs"].count_documents({}),
+        "sell":       db["tickets"].count_documents({"type": "Sell"}),
+        "buy":        db["tickets"].count_documents({"type": "Buy"}),
+        "partner":    db["tickets"].count_documents({"type": "Partner"}),
+    }
+
+    return render_template("analytics.html",
+        stats=stats,
+        type_counts=type_counts,
+        top_sellers=top_sellers
+    )
 
 # ─────────────────────────────────────────
 #  SETTINGS
@@ -299,12 +457,25 @@ def settings():
 @app.route("/save_settings", methods=["POST"])
 def save_settings():
     if not logged_in(): return redirect(url_for("login"))
-    footer = request.form.get("footer", "Powered by MEM Development | Deaplo")
-    db["config"].update_one(
-        {"key": "bot_settings"},
-        {"$set": {"footer": footer}},
-        upsert=True
-    )
+    data = {
+        "footer":          request.form.get("footer", "Powered by MEM Development | Deaplo"),
+        "embed_color":     request.form.get("embed_color", "#1a2332"),
+        "bot_status":      request.form.get("bot_status", ""),
+        "log_channel":     request.form.get("log_channel", ""),
+        "ticket_channel":  request.form.get("ticket_channel", ""),
+        "order_channel":   request.form.get("order_channel", ""),
+        "welcome_channel": request.form.get("welcome_channel", ""),
+        "lb_channel":      request.form.get("lb_channel", ""),
+        "systems": {
+            "tickets":    "sys_tickets"    in request.form,
+            "orders":     "sys_orders"     in request.form,
+            "welcome":    "sys_welcome"    in request.form,
+            "automod":    "sys_automod"    in request.form,
+            "leaderboard":"sys_leaderboard"in request.form,
+            "logging":    "sys_logging"    in request.form,
+        }
+    }
+    db["config"].update_one({"key": "bot_settings"}, {"$set": data}, upsert=True)
     return redirect(url_for("settings"))
 
 # ─────────────────────────────────────────

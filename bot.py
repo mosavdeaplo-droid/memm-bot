@@ -9,6 +9,7 @@ import asyncio
 import os
 import io
 import re
+import aiohttp
 
 # ═══════════════════════════════════════════════════════════════
 #  CONFIG
@@ -19,6 +20,7 @@ LOGO_URL = "https://cdn.discordapp.com/attachments/1504256416569884788/150579750
 EMBED_COLOR  = 0x1a2332
 FOOTER_TEXT  = "Powered by MEM Development | Deaplo"
 SERVER_NAME  = "MEM Store"
+GUILD_ID     = 1504256091872301116
 
 # ── Channels ──
 TICKET_CHANNEL_ID      = 1505921799978881105
@@ -51,10 +53,8 @@ GAME_ROLES = {
 
 # ── Bad Words Filter ──
 BAD_WORDS = [
-    # English
     "fuck", "shit", "bitch", "asshole", "bastard", "cunt", "damn", "dick",
     "pussy", "nigga", "nigger", "faggot", "retard", "whore", "slut",
-    # Arabic
     "كس", "زب", "طيز", "منيوك", "شرموط", "عرص", "خول", "متناك",
     "كلب", "حمار", "زنيك", "نيك", "ابن الشرموطة", "ابن الكلب",
     "يلعن", "العن", "لعنة", "قحبة", "وسخ",
@@ -65,22 +65,21 @@ spam_tracker = defaultdict(list)
 SPAM_LIMIT   = 5
 SPAM_WINDOW  = 5
 
-# ═══════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────
 #  DATABASE
-# ═══════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────
 mongo_client = MongoClient(os.getenv("MONGODB_URI"))
 db = mongo_client["mem_store"]
 
-# ═══════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────
 #  BOT SETUP
-# ═══════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────
 intents = discord.Intents.all()
 bot = discord.Bot(intents=intents)
 
-
-# ═══════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────
 #  HELPER: SEND LOG
-# ═══════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────
 async def send_log(guild, title: str, description: str, color: int = EMBED_COLOR, fields: list = None):
     channel = guild.get_channel(LOG_CHANNEL_ID)
     if not channel:
@@ -97,7 +96,6 @@ async def send_log(guild, title: str, description: str, color: int = EMBED_COLOR
     embed.set_footer(text=FOOTER_TEXT)
     await channel.send(embed=embed)
 
-    # حفظ اللوج في MongoDB
     try:
         log_entry = {
             "guild_id":    guild.id,
@@ -125,10 +123,9 @@ async def send_log(guild, title: str, description: str, color: int = EMBED_COLOR
     except Exception:
         pass
 
-
-# ═══════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────
 #  HELPER: SECURITY CHECK
-# ═══════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────
 def has_security_role():
     async def predicate(ctx):
         role = ctx.guild.get_role(SECURITY_ROLE_ID)
@@ -138,9 +135,26 @@ def has_security_role():
         return True
     return commands.check(predicate)
 
+# ─────────────────────────────────────────
+#  HELPER: DISCORD API CALL
+# ─────────────────────────────────────────
+async def discord_api(method: str, endpoint: str, data: dict = None):
+    url     = f"https://discord.com/api/v10{endpoint}"
+    headers = {
+        "Authorization": f"Bot {os.getenv('DISCORD_TOKEN')}",
+        "Content-Type":  "application/json",
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.request(method, url, json=data, headers=headers) as r:
+            if r.status in (200, 201, 204):
+                try:
+                    return await r.json()
+                except Exception:
+                    return {}
+            return None
 
 # ═══════════════════════════════════════════════════════════════
-#  ██████████  TICKETS SYSTEM
+#  ██  TICKETS SYSTEM
 # ═══════════════════════════════════════════════════════════════
 
 class TicketView(View):
@@ -226,7 +240,8 @@ async def open_ticket(interaction: discord.Interaction, ticket_type: str):
         "user_id":    member.id,
         "type":       ticket_type,
         "opened_at":  datetime.now(timezone.utc),
-        "seller_id":  None
+        "seller_id":  None,
+        "status":     "open",
     })
 
     embed = discord.Embed(
@@ -283,6 +298,8 @@ async def close_ticket(interaction: discord.Interaction):
     buyer_id  = ticket_data["user_id"]   if ticket_data else None
     seller_id = ticket_data["seller_id"] if ticket_data else None
 
+    db["tickets"].update_one({"channel_id": channel.id}, {"$set": {"status": "closed"}})
+
     if buyer_id and seller_id:
         buyer  = guild.get_member(buyer_id)
         seller = guild.get_member(seller_id)
@@ -335,9 +352,8 @@ async def submit_rating(interaction: discord.Interaction, seller_id: int, is_pos
     await interaction.response.edit_message(embed=embed, view=None)
     await update_leaderboard()
 
-
 # ═══════════════════════════════════════════════════════════════
-#  ██████████  ORDERS SYSTEM
+#  ██  ORDERS SYSTEM
 # ═══════════════════════════════════════════════════════════════
 
 class OrderView(View):
@@ -403,9 +419,8 @@ async def mark_done(interaction: discord.Interaction):
 
     await interaction.response.send_message("✅ Order marked as completed!", ephemeral=True)
 
-
 # ═══════════════════════════════════════════════════════════════
-#  ██████████  LEADERBOARD SYSTEM
+#  ██  LEADERBOARD
 # ═══════════════════════════════════════════════════════════════
 
 async def update_leaderboard():
@@ -453,9 +468,8 @@ async def update_leaderboard():
         upsert=True
     )
 
-
 # ═══════════════════════════════════════════════════════════════
-#  ██████████  WELCOME SYSTEM
+#  ██  WELCOME SYSTEM
 # ═══════════════════════════════════════════════════════════════
 
 @bot.event
@@ -464,6 +478,10 @@ async def on_member_join(member: discord.Member):
     channel = guild.get_channel(WELCOME_CHANNEL_ID)
     if not channel:
         return
+
+    # جيب الرسالة من DB لو اتغيرت من الداشبورد
+    config = db["config"].find_one({"key": "welcome_config"}) or {}
+    custom_msg = config.get("message", "We hope you have a great time.")
 
     ticket_channel = guild.get_channel(TICKET_CHANNEL_ID)
     order_channel  = guild.get_channel(ORDER_CHANNEL_ID)
@@ -477,7 +495,7 @@ async def on_member_join(member: discord.Member):
             f"• Our family now consists of **{guild.member_count} Members**\n"
             f"• For Make Ticket: {ticket_channel.mention if ticket_channel else '#ticket'}\n"
             f"• Check our orders: {order_channel.mention if order_channel else '#orders'}\n"
-            f"• We hope you have a great time."
+            f"• {custom_msg}"
         ),
         color=EMBED_COLOR,
         timestamp=datetime.now(timezone.utc)
@@ -502,6 +520,13 @@ async def on_member_join(member: discord.Member):
         f"**User:** {member.mention}\n**Account Created:** <t:{int(member.created_at.timestamp())}:R>",
         color=0x57F287)
 
+    # حفظ في DB
+    db["members"].update_one(
+        {"user_id": member.id},
+        {"$set": {"username": str(member), "joined_at": datetime.now(timezone.utc)}},
+        upsert=True
+    )
+
 
 @bot.event
 async def on_member_remove(member: discord.Member):
@@ -509,9 +534,8 @@ async def on_member_remove(member: discord.Member):
         f"**User:** {member.mention} ({member.name})",
         color=0xED4245)
 
-
 # ═══════════════════════════════════════════════════════════════
-#  ██████████  MODERATION SYSTEM
+#  ██  MODERATION
 # ═══════════════════════════════════════════════════════════════
 
 mod = bot.create_group("mod", "Moderation commands")
@@ -524,8 +548,7 @@ async def ban(ctx, member: Option(discord.Member, "Member to ban"), reason: Opti
         embed = discord.Embed(description=f"✅ **{member}** has been banned.\n**Reason:** {reason}", color=0xED4245)
         await ctx.respond(embed=embed)
         await send_log(ctx.guild, "🔨 Member Banned",
-            f"**User:** {member.mention}\n**By:** {ctx.author.mention}\n**Reason:** {reason}",
-            color=0xED4245)
+            f"**User:** {member.mention}\n**By:** {ctx.author.mention}\n**Reason:** {reason}", color=0xED4245)
     except discord.Forbidden:
         await ctx.respond("❌ I don't have permission to ban this member.", ephemeral=True)
 
@@ -552,8 +575,7 @@ async def kick(ctx, member: Option(discord.Member, "Member to kick"), reason: Op
         embed = discord.Embed(description=f"✅ **{member}** has been kicked.\n**Reason:** {reason}", color=0xED4245)
         await ctx.respond(embed=embed)
         await send_log(ctx.guild, "👢 Member Kicked",
-            f"**User:** {member.mention}\n**By:** {ctx.author.mention}\n**Reason:** {reason}",
-            color=0xED4245)
+            f"**User:** {member.mention}\n**By:** {ctx.author.mention}\n**Reason:** {reason}", color=0xED4245)
     except discord.Forbidden:
         await ctx.respond("❌ I don't have permission to kick this member.", ephemeral=True)
 
@@ -565,18 +587,17 @@ async def timeout(ctx,
     minutes: Option(int, "Duration in minutes", min_value=1, max_value=10080),
     reason: Option(str, "Reason", default="No reason provided")):
     try:
-        duration = discord.utils.utcnow() + __import__("datetime").timedelta(minutes=minutes)
-        await member.timeout_for(__import__("datetime").timedelta(minutes=minutes), reason=reason)
+        import datetime as dt
+        await member.timeout_for(dt.timedelta(minutes=minutes), reason=reason)
         embed = discord.Embed(
-            description=f"✅ **{member}** has been timed out for **{minutes} minutes**.\n**Reason:** {reason}",
-            color=0xFEE75C
-        )
+            description=f"✅ **{member}** timed out for **{minutes} minutes**.\n**Reason:** {reason}",
+            color=0xFEE75C)
         await ctx.respond(embed=embed)
         await send_log(ctx.guild, "⏰ Member Timed Out",
-            f"**User:** {member.mention}\n**By:** {ctx.author.mention}\n**Duration:** {minutes} minutes\n**Reason:** {reason}",
+            f"**User:** {member.mention}\n**By:** {ctx.author.mention}\n**Duration:** {minutes} min\n**Reason:** {reason}",
             color=0xFEE75C)
     except discord.Forbidden:
-        await ctx.respond("❌ I don't have permission to timeout this member.", ephemeral=True)
+        await ctx.respond("❌ I don't have permission.", ephemeral=True)
 
 
 @mod.command(name="untimeout", description="Remove timeout from a member")
@@ -595,6 +616,7 @@ async def untimeout(ctx, member: Option(discord.Member, "Member to untimeout")):
 @mod.command(name="warn", description="Warn a member")
 @has_security_role()
 async def warn(ctx, member: Option(discord.Member, "Member to warn"), reason: Option(str, "Reason")):
+    import datetime as dt
     db["warnings"].insert_one({
         "guild_id":  ctx.guild.id,
         "user_id":   member.id,
@@ -602,31 +624,24 @@ async def warn(ctx, member: Option(discord.Member, "Member to warn"), reason: Op
         "by":        ctx.author.id,
         "timestamp": datetime.now(timezone.utc)
     })
-
     warn_count = db["warnings"].count_documents({"guild_id": ctx.guild.id, "user_id": member.id})
-
     embed = discord.Embed(
-        description=f"⚠️ **{member}** has been warned.\n**Reason:** {reason}\n**Total warnings:** {warn_count}",
-        color=0xFEE75C
-    )
+        description=f"⚠️ **{member}** warned.\n**Reason:** {reason}\n**Total:** {warn_count}",
+        color=0xFEE75C)
     await ctx.respond(embed=embed)
     await send_log(ctx.guild, "⚠️ Member Warned",
         f"**User:** {member.mention}\n**By:** {ctx.author.mention}\n**Reason:** {reason}\n**Total:** {warn_count}",
         color=0xFEE75C)
-
-    # تصعيد تلقائي
     if warn_count >= 5:
         try:
-            await member.ban(reason="Auto-ban: 5 warnings reached")
-            await send_log(ctx.guild, "🔨 Auto Ban",
-                f"**User:** {member.mention} banned automatically after 5 warnings.", color=0xED4245)
+            await member.ban(reason="Auto-ban: 5 warnings")
+            await send_log(ctx.guild, "🔨 Auto Ban", f"**User:** {member.mention} — 5 warnings.", color=0xED4245)
         except discord.Forbidden:
             pass
     elif warn_count >= 3:
         try:
-            await member.timeout_for(__import__("datetime").timedelta(hours=1), reason="Auto-timeout: 3 warnings reached")
-            await send_log(ctx.guild, "⏰ Auto Timeout",
-                f"**User:** {member.mention} timed out automatically after 3 warnings.", color=0xFEE75C)
+            await member.timeout_for(dt.timedelta(hours=1), reason="Auto-timeout: 3 warnings")
+            await send_log(ctx.guild, "⏰ Auto Timeout", f"**User:** {member.mention} — 3 warnings.", color=0xFEE75C)
         except discord.Forbidden:
             pass
 
@@ -638,16 +653,8 @@ async def warnings(ctx, member: Option(discord.Member, "Member to check")):
     if not warns:
         await ctx.respond(f"✅ **{member}** has no warnings.", ephemeral=True)
         return
-
-    lines = []
-    for i, w in enumerate(warns, 1):
-        lines.append(f"`{i}.` {w['reason']} — <t:{int(w['timestamp'].timestamp())}:R>")
-
-    embed = discord.Embed(
-        title=f"⚠️ Warnings for {member}",
-        description="\n".join(lines),
-        color=0xFEE75C
-    )
+    lines = [f"`{i}.` {w['reason']} — <t:{int(w['timestamp'].timestamp())}:R>" for i, w in enumerate(warns, 1)]
+    embed = discord.Embed(title=f"⚠️ Warnings for {member}", description="\n".join(lines), color=0xFEE75C)
     await ctx.respond(embed=embed, ephemeral=True)
 
 
@@ -666,8 +673,7 @@ async def clear(ctx, amount: Option(int, "Number of messages to delete", min_val
     await ctx.channel.purge(limit=amount)
     await ctx.respond(f"✅ Deleted **{amount}** messages.", ephemeral=True)
     await send_log(ctx.guild, "🗑️ Messages Cleared",
-        f"**Channel:** {ctx.channel.mention}\n**Amount:** {amount}\n**By:** {ctx.author.mention}",
-        color=0xFEE75C)
+        f"**Channel:** {ctx.channel.mention}\n**Amount:** {amount}\n**By:** {ctx.author.mention}", color=0xFEE75C)
 
 
 @mod.command(name="lock", description="Lock a channel")
@@ -675,9 +681,8 @@ async def clear(ctx, amount: Option(int, "Number of messages to delete", min_val
 async def lock(ctx, channel: Option(discord.TextChannel, "Channel to lock", default=None)):
     ch = channel or ctx.channel
     await ch.set_permissions(ctx.guild.default_role, send_messages=False)
-    await ctx.respond(f"🔒 {ch.mention} has been locked.", ephemeral=True)
-    await send_log(ctx.guild, "🔒 Channel Locked",
-        f"**Channel:** {ch.mention}\n**By:** {ctx.author.mention}", color=0xED4245)
+    await ctx.respond(f"🔒 {ch.mention} locked.", ephemeral=True)
+    await send_log(ctx.guild, "🔒 Channel Locked", f"**Channel:** {ch.mention}\n**By:** {ctx.author.mention}", color=0xED4245)
 
 
 @mod.command(name="unlock", description="Unlock a channel")
@@ -685,9 +690,8 @@ async def lock(ctx, channel: Option(discord.TextChannel, "Channel to lock", defa
 async def unlock(ctx, channel: Option(discord.TextChannel, "Channel to unlock", default=None)):
     ch = channel or ctx.channel
     await ch.set_permissions(ctx.guild.default_role, send_messages=True)
-    await ctx.respond(f"🔓 {ch.mention} has been unlocked.", ephemeral=True)
-    await send_log(ctx.guild, "🔓 Channel Unlocked",
-        f"**Channel:** {ch.mention}\n**By:** {ctx.author.mention}", color=0x57F287)
+    await ctx.respond(f"🔓 {ch.mention} unlocked.", ephemeral=True)
+    await send_log(ctx.guild, "🔓 Channel Unlocked", f"**Channel:** {ch.mention}\n**By:** {ctx.author.mention}", color=0x57F287)
 
 
 @mod.command(name="slowmode", description="Set slowmode for a channel")
@@ -700,12 +704,10 @@ async def slowmode(ctx,
     status = f"set to **{seconds}s**" if seconds > 0 else "**disabled**"
     await ctx.respond(f"✅ Slowmode {status} in {ch.mention}.", ephemeral=True)
     await send_log(ctx.guild, "🐢 Slowmode Updated",
-        f"**Channel:** {ch.mention}\n**Slowmode:** {seconds}s\n**By:** {ctx.author.mention}",
-        color=0xFEE75C)
-
+        f"**Channel:** {ch.mention}\n**Slowmode:** {seconds}s\n**By:** {ctx.author.mention}", color=0xFEE75C)
 
 # ═══════════════════════════════════════════════════════════════
-#  ██████████  SELF ROLES SYSTEM
+#  ██  SELF ROLES
 # ═══════════════════════════════════════════════════════════════
 
 class LanguageRoleView(View):
@@ -742,11 +744,9 @@ async def toggle_role(interaction: discord.Interaction, role_id: int, role_name:
     guild  = interaction.guild
     member = interaction.user
     role   = guild.get_role(role_id)
-
     if not role:
         await interaction.response.send_message("❌ Role not found.", ephemeral=True)
         return
-
     if role in member.roles:
         await member.remove_roles(role)
         await interaction.response.send_message(f"✅ Removed **{role_name}** role.", ephemeral=True)
@@ -754,9 +754,8 @@ async def toggle_role(interaction: discord.Interaction, role_id: int, role_name:
         await member.add_roles(role)
         await interaction.response.send_message(f"✅ Added **{role_name}** role.", ephemeral=True)
 
-
 # ═══════════════════════════════════════════════════════════════
-#  ██████████  ANTI SPAM & AUTO MOD
+#  ██  AUTO MOD
 # ═══════════════════════════════════════════════════════════════
 
 URL_REGEX = re.compile(r"(https?://\S+|www\.\S+|discord\.gg/\S+)")
@@ -764,24 +763,16 @@ URL_REGEX = re.compile(r"(https?://\S+|www\.\S+|discord\.gg/\S+)")
 async def check_spam(message: discord.Message):
     user_id = message.author.id
     now     = datetime.now(timezone.utc).timestamp()
-
     spam_tracker[user_id] = [t for t in spam_tracker[user_id] if now - t < SPAM_WINDOW]
     spam_tracker[user_id].append(now)
-
     if len(spam_tracker[user_id]) >= SPAM_LIMIT:
         spam_tracker[user_id] = []
         try:
-            await message.author.timeout_for(
-                __import__("datetime").timedelta(minutes=5),
-                reason="Auto-mod: Spam detected"
-            )
-            embed = discord.Embed(
-                description=f"⚠️ {message.author.mention} has been timed out for **5 minutes** due to spamming.",
-                color=0xED4245
-            )
+            import datetime as dt
+            await message.author.timeout_for(dt.timedelta(minutes=5), reason="Auto-mod: Spam")
+            embed = discord.Embed(description=f"⚠️ {message.author.mention} timed out for **5 minutes** (spam).", color=0xED4245)
             await message.channel.send(embed=embed, delete_after=5)
-            await send_log(message.guild, "🚨 Anti-Spam",
-                f"**User:** {message.author.mention} timed out for spamming.", color=0xED4245)
+            await send_log(message.guild, "🚨 Anti-Spam", f"**User:** {message.author.mention}", color=0xED4245)
         except discord.Forbidden:
             pass
         return True
@@ -790,18 +781,19 @@ async def check_spam(message: discord.Message):
 
 async def check_bad_words(message: discord.Message):
     content_lower = message.content.lower()
-    for word in BAD_WORDS:
+    # جيب القايمة من DB لو اتحدثت من الداشبورد
+    config = db["config"].find_one({"key": "bad_words"})
+    words  = config.get("words", BAD_WORDS) if config else BAD_WORDS
+    for word in words:
         if word in content_lower:
             try:
                 await message.delete()
                 embed = discord.Embed(
                     description=f"⚠️ {message.author.mention} your message was removed for inappropriate language.",
-                    color=0xED4245
-                )
+                    color=0xED4245)
                 await message.channel.send(embed=embed, delete_after=5)
                 await send_log(message.guild, "🤬 Bad Word Detected",
-                    f"**User:** {message.author.mention}\n**Channel:** {message.channel.mention}",
-                    color=0xED4245)
+                    f"**User:** {message.author.mention}\n**Channel:** {message.channel.mention}", color=0xED4245)
             except discord.Forbidden:
                 pass
             return True
@@ -811,30 +803,27 @@ async def check_bad_words(message: discord.Message):
 async def check_links(message: discord.Message):
     if message.channel.id == LINKS_ALLOWED_CHANNEL:
         return False
-
     if URL_REGEX.search(message.content):
-        # السماح للستاف
         staff_role = message.guild.get_role(STAFF_ROLE_ID)
         if staff_role and staff_role in message.author.roles:
+            return False
+        if message.author.guild_permissions.administrator:
             return False
         try:
             await message.delete()
             embed = discord.Embed(
                 description=f"⚠️ {message.author.mention} links are not allowed in this channel.",
-                color=0xED4245
-            )
+                color=0xED4245)
             await message.channel.send(embed=embed, delete_after=5)
             await send_log(message.guild, "🔗 Link Blocked",
-                f"**User:** {message.author.mention}\n**Channel:** {message.channel.mention}",
-                color=0xED4245)
+                f"**User:** {message.author.mention}\n**Channel:** {message.channel.mention}", color=0xED4245)
         except discord.Forbidden:
             pass
         return True
     return False
 
-
 # ═══════════════════════════════════════════════════════════════
-#  ██████████  EVENTS
+#  ██  EVENTS
 # ═══════════════════════════════════════════════════════════════
 
 @bot.event
@@ -845,7 +834,7 @@ async def on_ready():
     bot.add_view(LanguageRoleView())
     bot.add_view(GameRoleView())
     await bot.sync_commands()
-    print(f"✅ {bot.user} is online | MEM Store Bot")
+    print(f"✅ {bot.user} is online | MEM Store Bot | Guild: {GUILD_ID}")
 
 
 @bot.event
@@ -853,65 +842,44 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # Orders System
     if message.channel.id == ORDER_CHANNEL_ID:
         content   = message.content
         author    = message.author
         timestamp = int(message.created_at.timestamp())
         await message.delete()
-
-        embed = discord.Embed(
-            title="🛒 MEM Store | ORDER",
-            description=content,
-            color=EMBED_COLOR
-        )
+        embed = discord.Embed(title="🛒 MEM Store | ORDER", description=content, color=EMBED_COLOR)
         embed.set_thumbnail(url=author.display_avatar.url)
         embed.set_image(url=GIF_URL)
         embed.add_field(name="• Posted By :", value=f"{author.mention} | <@&{ARC_ROLE_ID}>", inline=False)
         embed.add_field(name="⏰ Time:",       value=f"<t:{timestamp}:F>",                    inline=False)
         embed.set_footer(text=FOOTER_TEXT)
         await message.channel.send(embed=embed, view=OrderView(poster_id=author.id))
-
-        await send_log(message.guild, "📦 New Order Posted",
-            f"**By:** {author.mention}", color=0x5865F2)
+        await send_log(message.guild, "📦 New Order Posted", f"**By:** {author.mention}", color=0x5865F2)
         return
 
-    # Feedback System
     if message.channel.id == FEEDBACK_CHANNEL_ID:
         content   = message.content
         author    = message.author
         timestamp = int(message.created_at.timestamp())
         await message.delete()
-
-        embed = discord.Embed(
-            title="💬 MEM Store | FEEDBACK",
-            description=content,
-            color=EMBED_COLOR
-        )
+        embed = discord.Embed(title="💬 MEM Store | FEEDBACK", description=content, color=EMBED_COLOR)
         embed.set_thumbnail(url=author.display_avatar.url)
         embed.set_image(url=GIF_URL)
         embed.add_field(name="• Posted By :", value=f"{author.mention} | <@&{ARC_ROLE_ID}>", inline=False)
         embed.add_field(name="⏰ Time:",       value=f"<t:{timestamp}:F>",                    inline=False)
         embed.set_footer(text=FOOTER_TEXT)
         await message.channel.send(embed=embed)
-
-        await send_log(message.guild, "💬 New Feedback Posted",
-            f"**By:** {author.mention}", color=0x5865F2)
+        await send_log(message.guild, "💬 New Feedback Posted", f"**By:** {author.mention}", color=0x5865F2)
         return
 
-    # Auto Mod
-    if await check_bad_words(message):
-        return
-    if await check_links(message):
-        return
-    if await check_spam(message):
-        return
+    if await check_bad_words(message): return
+    if await check_links(message):     return
+    if await check_spam(message):      return
 
 
 @bot.event
 async def on_message_delete(message: discord.Message):
-    if message.author.bot or not message.guild:
-        return
+    if message.author.bot or not message.guild: return
     await send_log(message.guild, "🗑️ Message Deleted",
         f"**Author:** {message.author.mention}\n**Channel:** {message.channel.mention}\n**Content:** {message.content or 'No content'}",
         color=0xED4245)
@@ -919,17 +887,12 @@ async def on_message_delete(message: discord.Message):
 
 @bot.event
 async def on_message_edit(before: discord.Message, after: discord.Message):
-    if before.author.bot or not before.guild:
-        return
-    if before.content == after.content:
-        return
+    if before.author.bot or not before.guild: return
+    if before.content == after.content: return
     await send_log(before.guild, "✏️ Message Edited",
         f"**Author:** {before.author.mention}\n**Channel:** {before.channel.mention}",
         color=0xFEE75C,
-        fields=[
-            ("Before", before.content or "Empty", False),
-            ("After",  after.content  or "Empty", False),
-        ])
+        fields=[("Before", before.content or "Empty", False), ("After", after.content or "Empty", False)])
 
 
 @bot.event
@@ -939,9 +902,8 @@ async def on_member_update(before: discord.Member, after: discord.Member):
             f"**User:** {after.mention}\n**Before:** {before.display_name}\n**After:** {after.display_name}",
             color=0x5865F2)
 
-
 # ═══════════════════════════════════════════════════════════════
-#  ██████████  SLASH COMMANDS
+#  ██  SLASH COMMANDS
 # ═══════════════════════════════════════════════════════════════
 
 @bot.slash_command(name="ticket_panel", description="Send the MEM Store ticket panel")
@@ -961,7 +923,6 @@ async def ticket_panel(ctx):
     embed.set_thumbnail(url=LOGO_URL)
     embed.set_image(url=GIF_URL)
     embed.set_footer(text=FOOTER_TEXT)
-
     await ctx.channel.send(embed=embed, view=TicketView())
     await ctx.respond("✅ Ticket panel sent!", ephemeral=True)
 
@@ -978,7 +939,6 @@ async def leaderboard_setup(ctx):
         except Exception:
             pass
         db["config"].delete_one({"key": "leaderboard_message"})
-
     await update_leaderboard()
     await ctx.respond("✅ Leaderboard has been set up!", ephemeral=True)
 
@@ -987,21 +947,10 @@ async def leaderboard_setup(ctx):
 @commands.has_permissions(administrator=True)
 async def roles_panel(ctx):
     channel = bot.get_channel(SELF_ROLES_CHANNEL_ID)
-
-    lang_embed = discord.Embed(
-        title="🌍 Choose Your Language",
-        description="Click the button to get or remove a language role.",
-        color=EMBED_COLOR
-    )
+    lang_embed = discord.Embed(title="🌍 Choose Your Language", description="Click the button to get or remove a language role.", color=EMBED_COLOR)
     lang_embed.set_footer(text=FOOTER_TEXT)
-
-    game_embed = discord.Embed(
-        title="🎮 Choose Your Games",
-        description="Click the buttons to get or remove game roles.\nYou can select multiple games!",
-        color=EMBED_COLOR
-    )
+    game_embed = discord.Embed(title="🎮 Choose Your Games", description="Click the buttons to get or remove game roles.", color=EMBED_COLOR)
     game_embed.set_footer(text=FOOTER_TEXT)
-
     await channel.send(embed=lang_embed, view=LanguageRoleView())
     await channel.send(embed=game_embed, view=GameRoleView())
     await ctx.respond("✅ Roles panel sent!", ephemeral=True)

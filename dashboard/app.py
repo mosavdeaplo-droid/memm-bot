@@ -2,59 +2,53 @@ from flask import Flask, render_template, jsonify, request, redirect, url_for, s
 from pymongo import MongoClient
 from bson import ObjectId
 from datetime import datetime, timezone
-import os
-import requests
+import os, requests
 
 app = Flask(__name__)
 app.secret_key = "mem-store-secret-2026-xX"
 
-mongo_client = MongoClient(os.getenv("MONGODB_URI"))
+mongo_client = MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
 db = mongo_client["mem_store"]
 
 DASHBOARD_PASSWORD = "deaplo-_-100X#"
-DISCORD_BOT_TOKEN  = os.getenv("DISCORD_TOKEN")
+DISCORD_BOT_TOKEN  = os.getenv("DISCORD_TOKEN", "")
 
-# ─────────────────────────────────────────
-#  HELPERS
-# ─────────────────────────────────────────
-def logged_in():
-    return session.get("auth") == True
+GUILD_ID = 1504256091872301116
 
-def require_login():
-    if not logged_in():
-        return redirect(url_for("login"))
-    return None
+# ── Helpers ──
+def logged_in(): return session.get("auth") == True
 
 def get_username(user_id):
-    if not user_id:
-        return "Unknown"
+    if not user_id: return "Unknown"
     try:
-        r = requests.get(
-            f"https://discord.com/api/v10/users/{user_id}",
-            headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}"},
-            timeout=3
-        )
+        r = requests.get(f"https://discord.com/api/v10/users/{user_id}",
+            headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}, timeout=3)
         if r.status_code == 200:
-            data = r.json()
-            return data.get("global_name") or data.get("username", str(user_id))
-    except Exception:
-        pass
+            d = r.json()
+            return d.get("global_name") or d.get("username", str(user_id))
+    except: pass
     return str(user_id)
 
 def fmt_time(ts):
-    if not ts:
-        return "N/A"
-    if isinstance(ts, datetime):
-        return ts.strftime("%Y-%m-%d %H:%M")
+    if not ts: return "N/A"
+    if isinstance(ts, datetime): return ts.strftime("%Y-%m-%d %H:%M")
     return str(ts)
 
-# ─────────────────────────────────────────
-#  AUTH
-# ─────────────────────────────────────────
-@app.route("/login", methods=["GET", "POST"])
+def discord_api(method, endpoint, data=None):
+    url = f"https://discord.com/api/v10{endpoint}"
+    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "Content-Type": "application/json"}
+    try:
+        r = requests.request(method, url, json=data, headers=headers, timeout=5)
+        if r.status_code in (200, 201, 204):
+            try: return r.json()
+            except: return {}
+    except: pass
+    return None
+
+# ── Auth ──
+@app.route("/login", methods=["GET","POST"])
 def login():
-    if logged_in():
-        return redirect(url_for("home"))
+    if logged_in(): return redirect(url_for("home"))
     error = None
     if request.method == "POST":
         if request.form.get("password") == DASHBOARD_PASSWORD:
@@ -68,13 +62,10 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# ─────────────────────────────────────────
-#  HOME
-# ─────────────────────────────────────────
+# ── Home ──
 @app.route("/")
 def home():
     if not logged_in(): return redirect(url_for("login"))
-
     stats = {
         "tickets":  db["tickets"].count_documents({}),
         "orders":   db["leaderboard"].count_documents({}),
@@ -82,230 +73,142 @@ def home():
         "logs":     db["logs"].count_documents({}),
         "members":  db["members"].count_documents({}) if "members" in db.list_collection_names() else 0,
     }
-
-    top = list(db["leaderboard"].find().sort("positive", -1).limit(3))
+    top = list(db["leaderboard"].find().sort("positive",-1).limit(3))
     top_sellers = []
     for s in top:
-        total    = s.get("total", 0)
-        positive = s.get("positive", 0)
-        ratio    = round((positive / total) * 100) if total > 0 else 0
-        top_sellers.append({
-            "username": get_username(s.get("seller_id")),
-            "positive": positive,
-            "total":    total,
-            "ratio":    ratio,
-        })
-
-    recent_logs = list(db["logs"].find().sort("timestamp", -1).limit(5))
+        total=s.get("total",0); positive=s.get("positive",0)
+        top_sellers.append({"username":get_username(s.get("seller_id")),"positive":positive,"total":total,
+            "ratio":round((positive/total)*100) if total>0 else 0})
+    recent_logs = list(db["logs"].find().sort("timestamp",-1).limit(5))
     for l in recent_logs:
-        l["time"] = fmt_time(l.get("timestamp"))
-        l.pop("_id", None)
-
+        l["time"] = fmt_time(l.get("timestamp")); l.pop("_id",None)
     return render_template("home.html", stats=stats, top_sellers=top_sellers, recent_logs=recent_logs)
 
-# ─────────────────────────────────────────
-#  TICKETS
-# ─────────────────────────────────────────
+# ── Tickets ──
 @app.route("/tickets")
 def tickets():
     if not logged_in(): return redirect(url_for("login"))
-
-    tickets_raw = list(db["tickets"].find().sort("opened_at", -1).limit(50))
+    tickets_raw = list(db["tickets"].find().sort("opened_at",-1).limit(50))
     tickets_list = []
     for t in tickets_raw:
-        tickets_list.append({
-            "id":       str(t["_id"]),
-            "username": get_username(t.get("user_id")),
-            "user_id":  t.get("user_id"),
-            "type":     t.get("type", "N/A"),
-            "seller":   get_username(t.get("seller_id")) if t.get("seller_id") else "Unclaimed",
-            "time":     fmt_time(t.get("opened_at")),
-        })
-
-    stats = {
-        "total":   db["tickets"].count_documents({}),
-        "sell":    db["tickets"].count_documents({"type": "Sell"}),
-        "buy":     db["tickets"].count_documents({"type": "Buy"}),
-        "partner": db["tickets"].count_documents({"type": "Partner"}),
-    }
-
-    config = db["config"].find_one({"key": "ticket_config"}) or {}
-
+        tickets_list.append({"id":str(t["_id"]),"username":get_username(t.get("user_id")),
+            "user_id":t.get("user_id"),"type":t.get("type","N/A"),
+            "seller":get_username(t.get("seller_id")) if t.get("seller_id") else "Unclaimed",
+            "status":t.get("status","open"),"time":fmt_time(t.get("opened_at"))})
+    stats = {"total":db["tickets"].count_documents({}),"sell":db["tickets"].count_documents({"type":"Sell"}),
+        "buy":db["tickets"].count_documents({"type":"Buy"}),"partner":db["tickets"].count_documents({"type":"Partner"})}
+    config = db["config"].find_one({"key":"ticket_config"}) or {}
     return render_template("tickets.html", tickets=tickets_list, stats=stats, config=config)
 
 @app.route("/save_ticket_config", methods=["POST"])
 def save_ticket_config():
     if not logged_in(): return redirect(url_for("login"))
-    data = {
-        "title":       request.form.get("title", "🎫 MEM Store | Ticket Center"),
-        "description": request.form.get("description", ""),
-        "footer":      request.form.get("footer", "Powered by MEM Development | Deaplo"),
-        "category_id": request.form.get("category_id", ""),
-        "log_channel": request.form.get("log_channel", ""),
-    }
-    db["config"].update_one({"key": "ticket_config"}, {"$set": data}, upsert=True)
+    data = {"key":"ticket_config","title":request.form.get("title","🎫 MEM Store | Ticket Center"),
+        "description":request.form.get("description",""),"footer":request.form.get("footer",""),
+        "category_id":request.form.get("category_id",""),"log_channel":request.form.get("log_channel","")}
+    db["config"].update_one({"key":"ticket_config"},{"$set":data},upsert=True)
     return redirect(url_for("tickets"))
 
 @app.route("/delete_ticket/<ticket_id>", methods=["POST"])
 def delete_ticket(ticket_id):
     if not logged_in(): return redirect(url_for("login"))
-    try:
-        db["tickets"].delete_one({"_id": ObjectId(ticket_id)})
-    except Exception:
-        pass
+    try: db["tickets"].delete_one({"_id":ObjectId(ticket_id)})
+    except: pass
     return redirect(url_for("tickets"))
 
-# ─────────────────────────────────────────
-#  MARKETPLACE
-# ─────────────────────────────────────────
+# ── Marketplace ──
 @app.route("/marketplace")
 def marketplace():
     if not logged_in(): return redirect(url_for("login"))
-
-    sellers = list(db["leaderboard"].find().sort("positive", -1).limit(20))
+    sellers = list(db["leaderboard"].find().sort("positive",-1).limit(20))
     leaderboard = []
-    for i, s in enumerate(sellers):
-        total    = s.get("total", 0)
-        positive = s.get("positive", 0)
-        ratio    = round((positive / total) * 100) if total > 0 else 0
-        leaderboard.append({
-            "rank":      i + 1,
-            "id":        str(s["_id"]),
-            "seller_id": s.get("seller_id"),
-            "username":  get_username(s.get("seller_id")),
-            "total":     total,
-            "positive":  positive,
-            "negative":  total - positive,
-            "ratio":     ratio,
-        })
-
-    # Recent orders from logs
-    orders = list(db["logs"].find({"type": "order"}).sort("timestamp", -1).limit(10))
-    for o in orders:
-        o["time"] = fmt_time(o.get("timestamp"))
-        o.pop("_id", None)
-
-    # Feedback logs
-    feedback = list(db["logs"].find({"title": {"$regex": "Feedback", "$options": "i"}}).sort("timestamp", -1).limit(10))
-    for f in feedback:
-        f["time"] = fmt_time(f.get("timestamp"))
-        f.pop("_id", None)
-
+    for i,s in enumerate(sellers):
+        total=s.get("total",0); positive=s.get("positive",0)
+        leaderboard.append({"rank":i+1,"id":str(s["_id"]),"seller_id":s.get("seller_id"),
+            "username":get_username(s.get("seller_id")),"total":total,"positive":positive,
+            "negative":total-positive,"ratio":round((positive/total)*100) if total>0 else 0})
+    orders = list(db["logs"].find({"type":"order"}).sort("timestamp",-1).limit(10))
+    for o in orders: o["time"]=fmt_time(o.get("timestamp")); o.pop("_id",None)
+    feedback = list(db["logs"].find({"title":{"$regex":"Feedback","$options":"i"}}).sort("timestamp",-1).limit(10))
+    for f in feedback: f["time"]=fmt_time(f.get("timestamp")); f.pop("_id",None)
     return render_template("marketplace.html", leaderboard=leaderboard, orders=orders, feedback=feedback)
 
 @app.route("/reset_leaderboard", methods=["POST"])
 def reset_leaderboard():
     if not logged_in(): return redirect(url_for("login"))
-    db["leaderboard"].delete_many({})
-    db["config"].delete_one({"key": "leaderboard_message"})
+    db["leaderboard"].delete_many({}); db["config"].delete_one({"key":"leaderboard_message"})
     return redirect(url_for("marketplace"))
 
 @app.route("/delete_seller/<seller_id>", methods=["POST"])
 def delete_seller(seller_id):
     if not logged_in(): return redirect(url_for("login"))
-    try:
-        db["leaderboard"].delete_one({"_id": ObjectId(seller_id)})
-    except Exception:
-        pass
+    try: db["leaderboard"].delete_one({"_id":ObjectId(seller_id)})
+    except: pass
     return redirect(url_for("marketplace"))
 
-# ─────────────────────────────────────────
-#  MODERATION
-# ─────────────────────────────────────────
+# ── Moderation ──
 @app.route("/moderation")
 def moderation():
     if not logged_in(): return redirect(url_for("login"))
-
-    warnings_raw = list(db["warnings"].find().sort("timestamp", -1).limit(50))
+    warnings_raw = list(db["warnings"].find().sort("timestamp",-1).limit(50))
     warns = []
     for w in warnings_raw:
-        warns.append({
-            "id":       str(w["_id"]),
-            "username": get_username(w.get("user_id")),
-            "user_id":  w.get("user_id"),
-            "by":       get_username(w.get("by")),
-            "reason":   w.get("reason", "No reason"),
-            "time":     fmt_time(w.get("timestamp")),
-        })
-
-    stats = {
-        "total":   db["warnings"].count_documents({}),
-        "bans":    db["logs"].count_documents({"title": {"$regex": "Ban", "$options": "i"}}),
-        "kicks":   db["logs"].count_documents({"title": {"$regex": "Kick", "$options": "i"}}),
-        "timeouts":db["logs"].count_documents({"title": {"$regex": "Timeout", "$options": "i"}}),
-    }
-
-    # Blacklist
-    blacklist = list(db["blacklist"].find()) if "blacklist" in db.list_collection_names() else []
-    for b in blacklist:
-        b["id"] = str(b["_id"])
-        b["username"] = get_username(b.get("user_id"))
-        b.pop("_id", None)
-
+        warns.append({"id":str(w["_id"]),"username":get_username(w.get("user_id")),
+            "user_id":w.get("user_id"),"by":get_username(w.get("by")),
+            "reason":w.get("reason","No reason"),"time":fmt_time(w.get("timestamp"))})
+    stats = {"total":db["warnings"].count_documents({}),
+        "bans":db["logs"].count_documents({"title":{"$regex":"Ban","$options":"i"}}),
+        "kicks":db["logs"].count_documents({"title":{"$regex":"Kick","$options":"i"}}),
+        "timeouts":db["logs"].count_documents({"title":{"$regex":"Timeout","$options":"i"}})}
+    blacklist_raw = list(db["blacklist"].find()) if "blacklist" in db.list_collection_names() else []
+    blacklist = []
+    for b in blacklist_raw:
+        blacklist.append({"id":str(b["_id"]),"user_id":b.get("user_id"),
+            "username":get_username(b.get("user_id")),"reason":b.get("reason",""),"time":fmt_time(b.get("added_at"))})
     return render_template("moderation.html", warns=warns, stats=stats, blacklist=blacklist)
 
 @app.route("/delete_warning/<warning_id>", methods=["POST"])
 def delete_warning(warning_id):
     if not logged_in(): return redirect(url_for("login"))
-    try:
-        db["warnings"].delete_one({"_id": ObjectId(warning_id)})
-    except Exception:
-        pass
+    try: db["warnings"].delete_one({"_id":ObjectId(warning_id)})
+    except: pass
     return redirect(url_for("moderation"))
 
 @app.route("/clear_user_warnings/<int:user_id>", methods=["POST"])
 def clear_user_warnings(user_id):
     if not logged_in(): return redirect(url_for("login"))
-    db["warnings"].delete_many({"user_id": user_id})
+    db["warnings"].delete_many({"user_id":user_id})
     return redirect(url_for("moderation"))
 
 @app.route("/add_blacklist", methods=["POST"])
 def add_blacklist():
     if not logged_in(): return redirect(url_for("login"))
-    user_id = request.form.get("user_id", "").strip()
-    reason  = request.form.get("reason", "No reason")
+    user_id=request.form.get("user_id","").strip(); reason=request.form.get("reason","No reason")
     if user_id:
-        try:
-            db["blacklist"].update_one(
-                {"user_id": int(user_id)},
-                {"$set": {"user_id": int(user_id), "reason": reason, "added_at": datetime.now(timezone.utc)}},
-                upsert=True
-            )
-        except Exception:
-            pass
+        try: db["blacklist"].update_one({"user_id":int(user_id)},
+            {"$set":{"user_id":int(user_id),"reason":reason,"added_at":datetime.now(timezone.utc)}},upsert=True)
+        except: pass
     return redirect(url_for("moderation"))
 
 @app.route("/remove_blacklist/<entry_id>", methods=["POST"])
 def remove_blacklist(entry_id):
     if not logged_in(): return redirect(url_for("login"))
-    try:
-        db["blacklist"].delete_one({"_id": ObjectId(entry_id)})
-    except Exception:
-        pass
+    try: db["blacklist"].delete_one({"_id":ObjectId(entry_id)})
+    except: pass
     return redirect(url_for("moderation"))
 
-# ─────────────────────────────────────────
-#  LOGS
-# ─────────────────────────────────────────
+# ── Logs ──
 @app.route("/logs")
 def logs():
     if not logged_in(): return redirect(url_for("login"))
-
-    log_type = request.args.get("type", "all")
-    query = {} if log_type == "all" else {"type": log_type}
-
-    logs_raw = list(db["logs"].find(query).sort("timestamp", -1).limit(100))
+    log_type = request.args.get("type","all")
+    query = {} if log_type=="all" else {"type":log_type}
+    logs_raw = list(db["logs"].find(query).sort("timestamp",-1).limit(100))
     logs_list = []
     for l in logs_raw:
-        logs_list.append({
-            "title":       l.get("title", ""),
-            "description": l.get("description", ""),
-            "type":        l.get("type", "general"),
-            "time":        fmt_time(l.get("timestamp")),
-        })
-
-    log_types = ["all", "moderation", "ticket", "member", "message", "order", "automod", "general"]
-
+        logs_list.append({"title":l.get("title",""),"description":l.get("description",""),
+            "type":l.get("type","general"),"time":fmt_time(l.get("timestamp"))})
+    log_types = ["all","moderation","ticket","member","message","order","automod","general"]
     return render_template("logs.html", logs=logs_list, log_types=log_types, current_type=log_type)
 
 @app.route("/clear_logs", methods=["POST"])
@@ -314,187 +217,166 @@ def clear_logs():
     db["logs"].delete_many({})
     return redirect(url_for("logs"))
 
-# ─────────────────────────────────────────
-#  ROLES
-# ─────────────────────────────────────────
+# ── Roles ──
 @app.route("/roles")
 def roles():
     if not logged_in(): return redirect(url_for("login"))
-
-    config = db["config"].find_one({"key": "roles_config"}) or {}
-    language_roles = config.get("language_roles", {
-        "English": 1506219132037763092,
-        "Arabic":  1506219366939885669,
-    })
-    game_roles = config.get("game_roles", {
-        "ARC Raiders": 1506219518567911566,
-        "PUBG Mobile": 1506219627246649455,
-        "PUBG Steam":  1506219763171463209,
-    })
-    auto_roles = config.get("auto_roles", [])
-
-    return render_template("roles.html",
-        language_roles=language_roles,
-        game_roles=game_roles,
-        auto_roles=auto_roles
-    )
+    config = db["config"].find_one({"key":"roles_config"}) or {}
+    language_roles = config.get("language_roles",{"English":1506219132037763092,"Arabic":1506219366939885669})
+    game_roles = config.get("game_roles",{"ARC Raiders":1506219518567911566,"PUBG Mobile":1506219627246649455,"PUBG Steam":1506219763171463209})
+    return render_template("roles.html", language_roles=language_roles, game_roles=game_roles)
 
 @app.route("/save_roles", methods=["POST"])
 def save_roles():
     if not logged_in(): return redirect(url_for("login"))
-    # Parse language roles
-    lang_names = request.form.getlist("lang_name")
-    lang_ids   = request.form.getlist("lang_id")
-    language_roles = {n: int(i) for n, i in zip(lang_names, lang_ids) if n and i}
-    # Parse game roles
-    game_names = request.form.getlist("game_name")
-    game_ids   = request.form.getlist("game_id")
-    game_roles = {n: int(i) for n, i in zip(game_names, game_ids) if n and i}
-
-    db["config"].update_one(
-        {"key": "roles_config"},
-        {"$set": {"language_roles": language_roles, "game_roles": game_roles}},
-        upsert=True
-    )
+    lang_names=request.form.getlist("lang_name"); lang_ids=request.form.getlist("lang_id")
+    game_names=request.form.getlist("game_name"); game_ids=request.form.getlist("game_id")
+    language_roles={n:int(i) for n,i in zip(lang_names,lang_ids) if n and i}
+    game_roles={n:int(i) for n,i in zip(game_names,game_ids) if n and i}
+    db["config"].update_one({"key":"roles_config"},
+        {"$set":{"language_roles":language_roles,"game_roles":game_roles}},upsert=True)
     return redirect(url_for("roles"))
 
-# ─────────────────────────────────────────
-#  WELCOME
-# ─────────────────────────────────────────
+# ── Welcome ──
 @app.route("/welcome")
 def welcome():
     if not logged_in(): return redirect(url_for("login"))
-
-    config = db["config"].find_one({"key": "welcome_config"}) or {}
-
+    config = db["config"].find_one({"key":"welcome_config"}) or {}
     return render_template("welcome.html", config=config)
 
 @app.route("/save_welcome", methods=["POST"])
 def save_welcome():
     if not logged_in(): return redirect(url_for("login"))
-    data = {
-        "message":         request.form.get("message", "We hope you have a great time."),
-        "welcome_channel": request.form.get("welcome_channel", ""),
-        "member_role":     request.form.get("member_role", ""),
-        "auto_dm":         request.form.get("auto_dm", ""),
-        "leave_message":   request.form.get("leave_message", ""),
-    }
-    db["config"].update_one({"key": "welcome_config"}, {"$set": data}, upsert=True)
+    data={"message":request.form.get("message","We hope you have a great time."),
+        "welcome_channel":request.form.get("welcome_channel",""),
+        "member_role":request.form.get("member_role",""),
+        "leave_message":request.form.get("leave_message","")}
+    db["config"].update_one({"key":"welcome_config"},{"$set":data},upsert=True)
     return redirect(url_for("welcome"))
 
-# ─────────────────────────────────────────
-#  SECURITY
-# ─────────────────────────────────────────
+# ── Security ──
 @app.route("/security")
 def security():
     if not logged_in(): return redirect(url_for("login"))
-
-    config = db["config"].find_one({"key": "security_config"}) or {}
-    return render_template("security.html", config=config)
+    config = db["config"].find_one({"key":"security_config"}) or {}
+    bad_words_config = db["config"].find_one({"key":"bad_words"}) or {}
+    bad_words_list = bad_words_config.get("words",[])
+    return render_template("security.html", config=config, bad_words=bad_words_list)
 
 @app.route("/save_security", methods=["POST"])
 def save_security():
     if not logged_in(): return redirect(url_for("login"))
-    data = {
-        "anti_raid":    "anti_raid"    in request.form,
-        "anti_bot":     "anti_bot"     in request.form,
-        "anti_scam":    "anti_scam"    in request.form,
-        "anti_mention": "anti_mention" in request.form,
-        "anti_spam":    "anti_spam"    in request.form,
-        "anti_links":   "anti_links"   in request.form,
-        "mention_limit": int(request.form.get("mention_limit", 5)),
-        "spam_limit":    int(request.form.get("spam_limit", 5)),
-        "spam_window":   int(request.form.get("spam_window", 5)),
-    }
-    db["config"].update_one({"key": "security_config"}, {"$set": data}, upsert=True)
+    data={"anti_raid":"anti_raid" in request.form,"anti_bot":"anti_bot" in request.form,
+        "anti_scam":"anti_scam" in request.form,"anti_mention":"anti_mention" in request.form,
+        "anti_spam":"anti_spam" in request.form,"anti_links":"anti_links" in request.form,
+        "mention_limit":int(request.form.get("mention_limit",5)),
+        "spam_limit":int(request.form.get("spam_limit",5)),
+        "spam_window":int(request.form.get("spam_window",5))}
+    db["config"].update_one({"key":"security_config"},{"$set":data},upsert=True)
+    # Save bad words
+    words_raw = request.form.get("bad_words_list","")
+    words = [w.strip() for w in words_raw.split("\n") if w.strip()]
+    db["config"].update_one({"key":"bad_words"},{"$set":{"words":words}},upsert=True)
     return redirect(url_for("security"))
 
-# ─────────────────────────────────────────
-#  ANALYTICS
-# ─────────────────────────────────────────
+# ── Embed Builder ──
+@app.route("/embeds")
+def embeds():
+    if not logged_in(): return redirect(url_for("login"))
+    saved_embeds = list(db["saved_embeds"].find().sort("created_at",-1).limit(20))
+    for e in saved_embeds: e["id"]=str(e["_id"]); e.pop("_id",None)
+    return render_template("embeds.html", saved_embeds=saved_embeds)
+
+@app.route("/send_embed", methods=["POST"])
+def send_embed():
+    if not logged_in(): return redirect(url_for("login"))
+    channel_id = request.form.get("channel_id","").strip()
+    title      = request.form.get("title","")
+    description= request.form.get("description","")
+    color_hex  = request.form.get("color","#1a2332").lstrip("#")
+    footer     = request.form.get("footer","Powered by MEM Development | Deaplo")
+    image_url  = request.form.get("image_url","")
+    thumbnail  = request.form.get("thumbnail","")
+    save_it    = "save_embed" in request.form
+
+    try: color_int = int(color_hex,16)
+    except: color_int = 0x1a2332
+
+    embed_data = {"title":title,"description":description,"color":color_int,
+        "footer":{"text":footer}}
+    if image_url: embed_data["image"] = {"url":image_url}
+    if thumbnail: embed_data["thumbnail"] = {"url":thumbnail}
+
+    result = discord_api("POST", f"/channels/{channel_id}/messages", {"embeds":[embed_data]})
+
+    if save_it and title:
+        db["saved_embeds"].insert_one({"title":title,"description":description,"color":color_hex,
+            "footer":footer,"image_url":image_url,"thumbnail":thumbnail,
+            "created_at":datetime.now(timezone.utc)})
+
+    msg = "✅ Embed sent!" if result is not None else "❌ Failed to send. Check the channel ID."
+    return render_template("embeds.html",
+        saved_embeds=[{**e,"id":str(e["_id"])} for e in db["saved_embeds"].find().sort("created_at",-1).limit(20)],
+        flash_msg=msg,
+        form_data=request.form)
+
+@app.route("/delete_embed/<embed_id>", methods=["POST"])
+def delete_embed(embed_id):
+    if not logged_in(): return redirect(url_for("login"))
+    try: db["saved_embeds"].delete_one({"_id":ObjectId(embed_id)})
+    except: pass
+    return redirect(url_for("embeds"))
+
+# ── Analytics ──
 @app.route("/analytics")
 def analytics():
     if not logged_in(): return redirect(url_for("login"))
-
-    # Message stats by type
-    log_types = ["moderation", "ticket", "member", "message", "order", "automod", "general"]
-    type_counts = {t: db["logs"].count_documents({"type": t}) for t in log_types}
-
-    # Top sellers
-    top_sellers = list(db["leaderboard"].find().sort("positive", -1).limit(10))
+    log_types=["moderation","ticket","member","message","order","automod","general"]
+    type_counts={t:db["logs"].count_documents({"type":t}) for t in log_types}
+    top_sellers=list(db["leaderboard"].find().sort("positive",-1).limit(10))
     for s in top_sellers:
-        s["username"] = get_username(s.get("seller_id"))
-        total = s.get("total", 0)
-        positive = s.get("positive", 0)
-        s["ratio"] = round((positive / total) * 100) if total > 0 else 0
-        s.pop("_id", None)
+        s["username"]=get_username(s.get("seller_id"))
+        total=s.get("total",0); positive=s.get("positive",0)
+        s["ratio"]=round((positive/total)*100) if total>0 else 0
+        s.pop("_id",None)
+    stats={"tickets":db["tickets"].count_documents({}),"orders":db["leaderboard"].count_documents({}),
+        "warnings":db["warnings"].count_documents({}),"logs":db["logs"].count_documents({}),
+        "sell":db["tickets"].count_documents({"type":"Sell"}),
+        "buy":db["tickets"].count_documents({"type":"Buy"}),
+        "partner":db["tickets"].count_documents({"type":"Partner"})}
+    return render_template("analytics.html", stats=stats, type_counts=type_counts, top_sellers=top_sellers)
 
-    stats = {
-        "tickets":    db["tickets"].count_documents({}),
-        "orders":     db["leaderboard"].count_documents({}),
-        "warnings":   db["warnings"].count_documents({}),
-        "logs":       db["logs"].count_documents({}),
-        "sell":       db["tickets"].count_documents({"type": "Sell"}),
-        "buy":        db["tickets"].count_documents({"type": "Buy"}),
-        "partner":    db["tickets"].count_documents({"type": "Partner"}),
-    }
-
-    return render_template("analytics.html",
-        stats=stats,
-        type_counts=type_counts,
-        top_sellers=top_sellers
-    )
-
-# ─────────────────────────────────────────
-#  SETTINGS
-# ─────────────────────────────────────────
+# ── Settings ──
 @app.route("/settings")
 def settings():
     if not logged_in(): return redirect(url_for("login"))
-    config = db["config"].find_one({"key": "bot_settings"}) or {}
+    config = db["config"].find_one({"key":"bot_settings"}) or {}
     return render_template("settings.html", config=config)
 
 @app.route("/save_settings", methods=["POST"])
 def save_settings():
     if not logged_in(): return redirect(url_for("login"))
-    data = {
-        "footer":          request.form.get("footer", "Powered by MEM Development | Deaplo"),
-        "embed_color":     request.form.get("embed_color", "#1a2332"),
-        "bot_status":      request.form.get("bot_status", ""),
-        "log_channel":     request.form.get("log_channel", ""),
-        "ticket_channel":  request.form.get("ticket_channel", ""),
-        "order_channel":   request.form.get("order_channel", ""),
-        "welcome_channel": request.form.get("welcome_channel", ""),
-        "lb_channel":      request.form.get("lb_channel", ""),
-        "systems": {
-            "tickets":    "sys_tickets"    in request.form,
-            "orders":     "sys_orders"     in request.form,
-            "welcome":    "sys_welcome"    in request.form,
-            "automod":    "sys_automod"    in request.form,
-            "leaderboard":"sys_leaderboard"in request.form,
-            "logging":    "sys_logging"    in request.form,
-        }
-    }
-    db["config"].update_one({"key": "bot_settings"}, {"$set": data}, upsert=True)
+    data={"footer":request.form.get("footer","Powered by MEM Development | Deaplo"),
+        "embed_color":request.form.get("embed_color","#1a2332"),
+        "log_channel":request.form.get("log_channel",""),
+        "ticket_channel":request.form.get("ticket_channel",""),
+        "order_channel":request.form.get("order_channel",""),
+        "welcome_channel":request.form.get("welcome_channel",""),
+        "lb_channel":request.form.get("lb_channel",""),
+        "feedback_channel":request.form.get("feedback_channel",""),
+        "systems":{"tickets":"sys_tickets" in request.form,"orders":"sys_orders" in request.form,
+            "welcome":"sys_welcome" in request.form,"automod":"sys_automod" in request.form,
+            "leaderboard":"sys_leaderboard" in request.form,"logging":"sys_logging" in request.form}}
+    db["config"].update_one({"key":"bot_settings"},{"$set":data},upsert=True)
     return redirect(url_for("settings"))
 
-# ─────────────────────────────────────────
-#  API
-# ─────────────────────────────────────────
+# ── API ──
 @app.route("/api/stats")
 def api_stats():
-    if not logged_in():
-        return jsonify({"error": "Unauthorized"}), 401
-    return jsonify({
-        "tickets":  db["tickets"].count_documents({}),
-        "orders":   db["leaderboard"].count_documents({}),
-        "warnings": db["warnings"].count_documents({}),
-        "logs":     db["logs"].count_documents({}),
-    })
+    if not logged_in(): return jsonify({"error":"Unauthorized"}),401
+    return jsonify({"tickets":db["tickets"].count_documents({}),"orders":db["leaderboard"].count_documents({}),
+        "warnings":db["warnings"].count_documents({}),"logs":db["logs"].count_documents({})})
 
-# ─────────────────────────────────────────
-#  RUN
-# ─────────────────────────────────────────
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
+    port = int(os.getenv("PORT",5000))
     app.run(host="0.0.0.0", port=port)

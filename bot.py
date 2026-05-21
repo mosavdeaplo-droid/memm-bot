@@ -28,6 +28,7 @@ LOG_CHANNEL_ID         = 1505308788780040222
 LEADERBOARD_CHANNEL_ID = 1505922561903562812
 LINKS_ALLOWED_CHANNEL  = 1504271389656486049
 SELF_ROLES_CHANNEL_ID  = 1506220242626543697
+FEEDBACK_CHANNEL_ID    = 1506926493798764635
 
 # ── Categories ──
 TICKET_CATEGORY_ID = 1505922835359596644
@@ -854,27 +855,47 @@ async def on_message(message: discord.Message):
 
     # Orders System
     if message.channel.id == ORDER_CHANNEL_ID:
-        content = message.content
-        author  = message.author
+        content   = message.content
+        author    = message.author
+        timestamp = int(message.created_at.timestamp())
         await message.delete()
 
         embed = discord.Embed(
             title="🛒 MEM Store | ORDER",
             description=content,
-            color=EMBED_COLOR,
-            timestamp=datetime.now(timezone.utc)
+            color=EMBED_COLOR
         )
         embed.set_thumbnail(url=author.display_avatar.url)
         embed.set_image(url=GIF_URL)
-        embed.add_field(
-            name="Posted By",
-            value=f"{author.mention} | <@&{ARC_ROLE_ID}> | Community",
-            inline=False
-        )
+        embed.add_field(name="• Posted By :", value=f"{author.mention} | <@&{ARC_ROLE_ID}>", inline=False)
+        embed.add_field(name="⏰ Time:",       value=f"<t:{timestamp}:F>",                    inline=False)
         embed.set_footer(text=FOOTER_TEXT)
         await message.channel.send(embed=embed, view=OrderView(poster_id=author.id))
 
         await send_log(message.guild, "📦 New Order Posted",
+            f"**By:** {author.mention}", color=0x5865F2)
+        return
+
+    # Feedback System
+    if message.channel.id == FEEDBACK_CHANNEL_ID:
+        content   = message.content
+        author    = message.author
+        timestamp = int(message.created_at.timestamp())
+        await message.delete()
+
+        embed = discord.Embed(
+            title="💬 MEM Store | FEEDBACK",
+            description=content,
+            color=EMBED_COLOR
+        )
+        embed.set_thumbnail(url=author.display_avatar.url)
+        embed.set_image(url=GIF_URL)
+        embed.add_field(name="• Posted By :", value=f"{author.mention} | <@&{ARC_ROLE_ID}>", inline=False)
+        embed.add_field(name="⏰ Time:",       value=f"<t:{timestamp}:F>",                    inline=False)
+        embed.set_footer(text=FOOTER_TEXT)
+        await message.channel.send(embed=embed)
+
+        await send_log(message.guild, "💬 New Feedback Posted",
             f"**By:** {author.mention}", color=0x5865F2)
         return
 

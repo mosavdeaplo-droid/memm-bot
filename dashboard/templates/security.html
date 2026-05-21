@@ -43,7 +43,7 @@
       <div class="card">
         <div class="form-group">
           <label class="form-label">One word per line</label>
-          <textarea class="form-input" name="bad_words_list" rows="8" placeholder="word1&#10;word2&#10;...">{{ bad_words|join('\n') }}</textarea>
+          <textarea class="form-input" name="bad_words_list" rows="8" placeholder="word1&#10;word2&#10;...">{{ bad_words | join('&#10;') }}</textarea>
         </div>
       </div>
     </div>

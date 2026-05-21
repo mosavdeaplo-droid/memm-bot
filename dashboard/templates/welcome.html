@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Welcome{% endblock %}
+{% block page_title %}Welcome System{% endblock %}
+{% block page_subtitle %}Welcome Message Settings{% endblock %}
+
+{% block content %}
+
+<div class="section">
+  <div class="section-header">
+    <div class="section-title">👋 Welcome Message</div>
+  </div>
+  <div class="card">
+    <form method="POST" action="/save_welcome">
+      <div class="form-group">
+        <label class="form-label">Welcome Message Text</label>
+        <textarea name="message" class="form-input" rows="4" style="resize:vertical">{{ welcome_msg }}</textarea>
+      </div>
+      <button type="submit" class="btn btn-gold">💾 Save Changes</button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

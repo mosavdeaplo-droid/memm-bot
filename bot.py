@@ -95,6 +95,34 @@ async def send_log(guild, title: str, description: str, color: int = EMBED_COLOR
     embed.set_footer(text=FOOTER_TEXT)
     await channel.send(embed=embed)
 
+    # حفظ اللوج في MongoDB
+    try:
+        log_entry = {
+            "guild_id":    guild.id,
+            "title":       title,
+            "description": description,
+            "fields":      [{"name": f[0], "value": f[1]} for f in (fields or [])],
+            "timestamp":   datetime.now(timezone.utc),
+            "color":       color,
+        }
+        if any(x in title for x in ["Ban", "Kick", "Warn", "Timeout"]):
+            log_entry["type"] = "moderation"
+        elif "Ticket" in title:
+            log_entry["type"] = "ticket"
+        elif any(x in title for x in ["Member", "Join", "Left"]):
+            log_entry["type"] = "member"
+        elif any(x in title for x in ["Message", "Edit", "Delete"]):
+            log_entry["type"] = "message"
+        elif "Order" in title:
+            log_entry["type"] = "order"
+        elif any(x in title for x in ["Spam", "Link", "Bad Word"]):
+            log_entry["type"] = "automod"
+        else:
+            log_entry["type"] = "general"
+        db["logs"].insert_one(log_entry)
+    except Exception:
+        pass
+
 
 # ═══════════════════════════════════════════════════════════════
 #  HELPER: SECURITY CHECK
@@ -311,10 +339,9 @@ async def submit_rating(interaction: discord.Interaction, seller_id: int, is_pos
 # ═══════════════════════════════════════════════════════════════
 
 class OrderView(View):
-    def __init__(self, poster_id: int = 0, mentioned_ids: list = None):
+    def __init__(self, poster_id: int = 0):
         super().__init__(timeout=None)
-        self.poster_id    = poster_id
-        self.mentioned_ids = mentioned_ids or []
+        self.poster_id = poster_id
 
     @discord.ui.button(label="تواصل مع صاحب الرسالة", emoji="💬", style=discord.ButtonStyle.primary, custom_id="order_contact")
     async def contact_button(self, button: Button, interaction: discord.Interaction):
@@ -322,14 +349,6 @@ class OrderView(View):
 
     @discord.ui.button(label="تم الاستلام", emoji="✅", style=discord.ButtonStyle.success, custom_id="order_done")
     async def done_button(self, button: Button, interaction: discord.Interaction):
-        user_id = interaction.user.id
-        allowed = [self.poster_id] + self.mentioned_ids
-        if allowed and user_id not in allowed:
-            await interaction.response.send_message(
-                "❌ فقط صاحب الطلب أو المنشن في الرسالة يمكنه الضغط على هذا الزر.",
-                ephemeral=True
-            )
-            return
         await mark_done(interaction)
 
 
@@ -544,8 +563,8 @@ async def timeout(ctx,
     minutes: Option(int, "Duration in minutes", min_value=1, max_value=10080),
     reason: Option(str, "Reason", default="No reason provided")):
     try:
-        import datetime as dt
-        await member.timeout_for(dt.timedelta(minutes=minutes), reason=reason)
+        duration = discord.utils.utcnow() + __import__("datetime").timedelta(minutes=minutes)
+        await member.timeout_for(__import__("datetime").timedelta(minutes=minutes), reason=reason)
         embed = discord.Embed(
             description=f"✅ **{member}** has been timed out for **{minutes} minutes**.\n**Reason:** {reason}",
             color=0xFEE75C
@@ -574,7 +593,6 @@ async def untimeout(ctx, member: Option(discord.Member, "Member to untimeout")):
 @mod.command(name="warn", description="Warn a member")
 @has_security_role()
 async def warn(ctx, member: Option(discord.Member, "Member to warn"), reason: Option(str, "Reason")):
-    import datetime as dt
     db["warnings"].insert_one({
         "guild_id":  ctx.guild.id,
         "user_id":   member.id,
@@ -594,6 +612,7 @@ async def warn(ctx, member: Option(discord.Member, "Member to warn"), reason: Op
         f"**User:** {member.mention}\n**By:** {ctx.author.mention}\n**Reason:** {reason}\n**Total:** {warn_count}",
         color=0xFEE75C)
 
+    # تصعيد تلقائي
     if warn_count >= 5:
         try:
             await member.ban(reason="Auto-ban: 5 warnings reached")
@@ -603,7 +622,7 @@ async def warn(ctx, member: Option(discord.Member, "Member to warn"), reason: Op
             pass
     elif warn_count >= 3:
         try:
-            await member.timeout_for(dt.timedelta(hours=1), reason="Auto-timeout: 3 warnings reached")
+            await member.timeout_for(__import__("datetime").timedelta(hours=1), reason="Auto-timeout: 3 warnings reached")
             await send_log(ctx.guild, "⏰ Auto Timeout",
                 f"**User:** {member.mention} timed out automatically after 3 warnings.", color=0xFEE75C)
         except discord.Forbidden:
@@ -687,82 +706,34 @@ async def slowmode(ctx,
 #  ██████████  SELF ROLES SYSTEM
 # ═══════════════════════════════════════════════════════════════
 
-class LanguageSelect(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(
-                label="English",
-                emoji="🇬🇧",
-                description="Get the English language role",
-                value="English"
-            ),
-            discord.SelectOption(
-                label="العربية",
-                emoji="🇸🇦",
-                description="احصل على رول اللغة العربية",
-                value="Arabic"
-            ),
-        ]
-        super().__init__(
-            placeholder="🌍 Choose your language! | اختر لغتك!",
-            min_values=1,
-            max_values=1,
-            options=options,
-            custom_id="select_language"
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        selected = self.values[0]
-        role_id  = LANGUAGE_ROLES[selected]
-        await toggle_role(interaction, role_id, selected)
-
-
 class LanguageRoleView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(LanguageSelect())
 
+    @discord.ui.button(label="🇬🇧 English", style=discord.ButtonStyle.primary, custom_id="role_english")
+    async def english_button(self, button: Button, interaction: discord.Interaction):
+        await toggle_role(interaction, LANGUAGE_ROLES["English"], "English")
 
-class GameSelect(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(
-                label="ARC Raiders",
-                emoji="🎯",
-                description="Join the ARC Raiders channel",
-                value="ARC Raiders"
-            ),
-            discord.SelectOption(
-                label="PUBG Mobile",
-                emoji="📱",
-                description="Join the PUBG Mobile channel",
-                value="PUBG Mobile"
-            ),
-            discord.SelectOption(
-                label="PUBG Steam",
-                emoji="💻",
-                description="Join the PUBG Steam channel",
-                value="PUBG Steam"
-            ),
-        ]
-        super().__init__(
-            placeholder="🎮 Choose your game! | اختر لعبتك!",
-            min_values=1,
-            max_values=1,
-            options=options,
-            custom_id="select_game"
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        selected = self.values[0]
-        role_id  = GAME_ROLES[selected]
-        await toggle_role(interaction, role_id, selected)
+    @discord.ui.button(label="🇸🇦 Arabic", style=discord.ButtonStyle.primary, custom_id="role_arabic")
+    async def arabic_button(self, button: Button, interaction: discord.Interaction):
+        await toggle_role(interaction, LANGUAGE_ROLES["Arabic"], "Arabic")
 
 
 class GameRoleView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(GameSelect())
+
+    @discord.ui.button(label="🎮 ARC Raiders", style=discord.ButtonStyle.secondary, custom_id="role_arc")
+    async def arc_button(self, button: Button, interaction: discord.Interaction):
+        await toggle_role(interaction, GAME_ROLES["ARC Raiders"], "ARC Raiders")
+
+    @discord.ui.button(label="🎮 PUBG Mobile", style=discord.ButtonStyle.secondary, custom_id="role_pubgm")
+    async def pubgm_button(self, button: Button, interaction: discord.Interaction):
+        await toggle_role(interaction, GAME_ROLES["PUBG Mobile"], "PUBG Mobile")
+
+    @discord.ui.button(label="🎮 PUBG Steam", style=discord.ButtonStyle.secondary, custom_id="role_pubgs")
+    async def pubgs_button(self, button: Button, interaction: discord.Interaction):
+        await toggle_role(interaction, GAME_ROLES["PUBG Steam"], "PUBG Steam")
 
 
 async def toggle_role(interaction: discord.Interaction, role_id: int, role_name: str):
@@ -776,16 +747,10 @@ async def toggle_role(interaction: discord.Interaction, role_id: int, role_name:
 
     if role in member.roles:
         await member.remove_roles(role)
-        await interaction.response.send_message(
-            f"✅ تم إزالة رول **{role_name}** منك.\nRemoved **{role_name}** role.",
-            ephemeral=True
-        )
+        await interaction.response.send_message(f"✅ Removed **{role_name}** role.", ephemeral=True)
     else:
         await member.add_roles(role)
-        await interaction.response.send_message(
-            f"✅ تم إضافة رول **{role_name}** إليك.\nAdded **{role_name}** role.",
-            ephemeral=True
-        )
+        await interaction.response.send_message(f"✅ Added **{role_name}** role.", ephemeral=True)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -804,9 +769,8 @@ async def check_spam(message: discord.Message):
     if len(spam_tracker[user_id]) >= SPAM_LIMIT:
         spam_tracker[user_id] = []
         try:
-            import datetime as dt
             await message.author.timeout_for(
-                dt.timedelta(minutes=5),
+                __import__("datetime").timedelta(minutes=5),
                 reason="Auto-mod: Spam detected"
             )
             embed = discord.Embed(
@@ -847,18 +811,14 @@ async def check_links(message: discord.Message):
         return False
 
     if URL_REGEX.search(message.content):
-        if message.author.guild_permissions.administrator:
-            return False
+        # السماح للستاف
         staff_role = message.guild.get_role(STAFF_ROLE_ID)
         if staff_role and staff_role in message.author.roles:
             return False
         try:
             await message.delete()
             embed = discord.Embed(
-                description=(
-                    f"⚠️ {message.author.mention} لا يُسمح بإرسال الروابط في هذه القناة.\n"
-                    f"Links are not allowed in this channel."
-                ),
+                description=f"⚠️ {message.author.mention} links are not allowed in this channel.",
                 color=0xED4245
             )
             await message.channel.send(embed=embed, delete_after=5)
@@ -893,11 +853,8 @@ async def on_message(message: discord.Message):
 
     # Orders System
     if message.channel.id == ORDER_CHANNEL_ID:
-        content  = message.content
-        author   = message.author
-        mentions = message.mentions
-        timestamp = int(datetime.now(timezone.utc).timestamp())
-        mentioned_ids = [u.id for u in mentions if u.id != author.id]
+        content = message.content
+        author  = message.author
         await message.delete()
 
         embed = discord.Embed(
@@ -907,25 +864,13 @@ async def on_message(message: discord.Message):
             timestamp=datetime.now(timezone.utc)
         )
         embed.set_thumbnail(url=author.display_avatar.url)
-
         embed.add_field(
-            name="\u200b",
-            value=f"• **Posted By :** {author.mention} | <@&1506219518567911566>",
+            name="Posted By",
+            value=f"{author.mention} | <@&{STAFF_ROLE_ID}> | Community",
             inline=False
         )
-        embed.add_field(
-            name="\u200b",
-            value=f"⏰ **Time:** <t:{timestamp}:F>",
-            inline=False
-        )
-
-        embed.set_image(url=GIF_URL)
         embed.set_footer(text=FOOTER_TEXT)
-
-        await message.channel.send(
-            embed=embed,
-            view=OrderView(poster_id=author.id, mentioned_ids=mentioned_ids)
-        )
+        await message.channel.send(embed=embed, view=OrderView(poster_id=author.id))
 
         await send_log(message.guild, "📦 New Order Posted",
             f"**By:** {author.mention}", color=0x5865F2)
@@ -1021,25 +966,17 @@ async def roles_panel(ctx):
     channel = bot.get_channel(SELF_ROLES_CHANNEL_ID)
 
     lang_embed = discord.Embed(
-        title="Choose your Language 🌍",
-        description=(
-            "Choose your preferred language to access its channels! 🗣️\n\n"
-            "اختر لغتك المفضلة للوصول إلى قنواتها! 🗣️"
-        ),
+        title="🌍 Choose Your Language",
+        description="Click the button to get or remove a language role.",
         color=EMBED_COLOR
     )
-    lang_embed.set_image(url=GIF_URL)
     lang_embed.set_footer(text=FOOTER_TEXT)
 
     game_embed = discord.Embed(
-        title="Choose your favourite games 🎮",
-        description=(
-            "Choose your favorite games to join their channels! 🕹️\n\n"
-            "اختر ألعابك المفضلة للانضمام إلى قنواتها! 🕹️"
-        ),
+        title="🎮 Choose Your Games",
+        description="Click the buttons to get or remove game roles.\nYou can select multiple games!",
         color=EMBED_COLOR
     )
-    game_embed.set_image(url=GIF_URL)
     game_embed.set_footer(text=FOOTER_TEXT)
 
     await channel.send(embed=lang_embed, view=LanguageRoleView())

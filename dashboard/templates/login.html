@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MEM Store | Login</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root { --bg:#0b0e14; --surface:#111620; --gold:#c9a84c; --gold-dim:#6b5420; --text:#d4c9a8; --text-dim:#6b7080; --red:#e74c3c; --border:rgba(201,168,76,0.15); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:'Rajdhani',sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; }
+body::before { content:''; position:fixed; inset:0; background-image:linear-gradient(rgba(201,168,76,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(201,168,76,0.03) 1px,transparent 1px); background-size:40px 40px; pointer-events:none; }
+.corner { position:fixed; width:100px; height:100px; border-color:var(--gold-dim); border-style:solid; opacity:0.4; pointer-events:none; }
+.corner.tl { top:16px; left:16px; border-width:2px 0 0 2px; }
+.corner.tr { top:16px; right:16px; border-width:2px 2px 0 0; }
+.corner.bl { bottom:16px; left:16px; border-width:0 0 2px 2px; }
+.corner.br { bottom:16px; right:16px; border-width:0 2px 2px 0; }
+.box { position:relative; z-index:10; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:48px 40px; width:100%; max-width:400px; text-align:center; }
+.box::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; border-radius:16px 16px 0 0; background:linear-gradient(90deg,transparent,var(--gold),transparent); }
+.logo { width:100%; height:80px; object-fit:cover; border-radius:8px; margin-bottom:20px; }
+h1 { font-family:'Cinzel',serif; font-size:26px; font-weight:900; letter-spacing:4px; color:var(--gold); margin-bottom:4px; }
+.sub { font-size:11px; letter-spacing:3px; color:var(--text-dim); margin-bottom:32px; text-transform:uppercase; }
+input { width:100%; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:8px; padding:14px 16px; color:var(--text); font-family:'Rajdhani',sans-serif; font-size:16px; letter-spacing:2px; outline:none; margin-bottom:12px; transition:border-color 0.2s; }
+input:focus { border-color:var(--gold-dim); }
+input::placeholder { color:var(--text-dim); letter-spacing:1px; }
+button { width:100%; padding:14px; background:linear-gradient(135deg,var(--gold-dim),var(--gold)); border:none; border-radius:8px; color:#0b0e14; font-family:'Cinzel',serif; font-size:13px; font-weight:700; letter-spacing:3px; cursor:pointer; transition:opacity 0.2s,transform 0.2s; }
+button:hover { opacity:0.9; transform:translateY(-1px); }
+.error { background:rgba(231,76,60,0.1); border:1px solid rgba(231,76,60,0.3); border-radius:8px; padding:10px; color:var(--red); font-size:13px; margin-bottom:16px; letter-spacing:1px; }
+.footer { margin-top:24px; font-size:11px; letter-spacing:2px; color:var(--text-dim); }
+.footer span { color:var(--gold); }
+</style>
+</head>
+<body>
+<div class="corner tl"></div>
+<div class="corner tr"></div>
+<div class="corner bl"></div>
+<div class="corner br"></div>
+<div class="box">
+  <img class="logo" src="https://cdn.discordapp.com/attachments/1504256416569884788/1505797501830299658/mem.gif?ex=6a0beeb4&is=6a0a9d34&hm=585f6fd768b4a07d864ca2ba8f08803482445772c4159fd9e2aaead05af4dad8&" alt="MEM">
+  <h1>MEM STORE</h1>
+  <p class="sub">Dashboard Access</p>
+  {% if error %}<div class="error">❌ {{ error }}</div>{% endif %}
+  <form method="POST">
+    <input type="password" name="password" placeholder="Enter password..." autofocus>
+    <button type="submit">ENTER DASHBOARD</button>
+  </form>
+  <div class="footer">Powered by <span>MEM Development</span> | Deaplo</div>
+</div>
+</body>
+</html>

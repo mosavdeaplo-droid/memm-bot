@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Roles{% endblock %}
+{% block page_title %}Roles{% endblock %}
+{% block page_subtitle %}Self Roles Management{% endblock %}
+
+{% block content %}
+
+<div class="grid-2">
+  <!-- Language Roles -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">🌍 Language Roles</div>
+    </div>
+    <div class="table-wrap">
+      <div class="table-row header" style="grid-template-columns:1fr 1fr">
+        <div>Language</div><div>Role ID</div>
+      </div>
+      {% for name, role_id in language_roles.items() %}
+      <div class="table-row" style="grid-template-columns:1fr 1fr">
+        <div>{{ name }}</div>
+        <div style="color:var(--text-dim);font-family:monospace;font-size:12px">{{ role_id }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Game Roles -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">🎮 Game Roles</div>
+    </div>
+    <div class="table-wrap">
+      <div class="table-row header" style="grid-template-columns:1fr 1fr">
+        <div>Game</div><div>Role ID</div>
+      </div>
+      {% for name, role_id in game_roles.items() %}
+      <div class="table-row" style="grid-template-columns:1fr 1fr">
+        <div>{{ name }}</div>
+        <div style="color:var(--text-dim);font-family:monospace;font-size:12px">{{ role_id }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}

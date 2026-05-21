@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Moderation{% endblock %}
+{% block page_title %}Moderation{% endblock %}
+{% block page_subtitle %}Warnings & Punishments Management{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="grid-template-columns:repeat(1,1fr);max-width:200px">
+  <div class="stat-card">
+    <div class="stat-icon">⚠️</div>
+    <div class="stat-value">{{ stats.total }}</div>
+    <div class="stat-label">Total Warnings</div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-header">
+    <div class="section-title">⚠️ Warnings</div>
+  </div>
+  <div class="table-wrap">
+    <div class="table-row header" style="grid-template-columns:1fr 1fr 2fr 100px 120px">
+      <div>User</div><div>By</div><div>Reason</div><div>Time</div><div></div>
+    </div>
+    {% if warns %}
+      {% for w in warns %}
+      <div class="table-row" style="grid-template-columns:1fr 1fr 2fr 100px 120px">
+        <div>{{ w.username }}</div>
+        <div style="color:var(--text-dim)">{{ w.by }}</div>
+        <div>{{ w.reason }}</div>
+        <div style="font-size:11px;color:var(--text-dim)">{{ w.time }}</div>
+        <div style="display:flex;gap:6px">
+          <form method="POST" action="/delete_warning/{{ w.id }}">
+            <button type="submit" class="btn btn-danger">Delete</button>
+          </form>
+          <form method="POST" action="/clear_user_warnings/{{ w.user_id }}" onsubmit="return confirm('Clear all warnings for this user?')">
+            <button type="submit" class="btn btn-gold">Clear All</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">NO WARNINGS YET</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

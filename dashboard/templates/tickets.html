@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Tickets{% endblock %}
+{% block page_title %}Tickets{% endblock %}
+{% block page_subtitle %}Ticket Management System{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
+  <div class="stat-card">
+    <div class="stat-icon">🎫</div>
+    <div class="stat-value">{{ stats.total }}</div>
+    <div class="stat-label">Total</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon">💰</div>
+    <div class="stat-value">{{ stats.sell }}</div>
+    <div class="stat-label">Sell</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon">🛒</div>
+    <div class="stat-value">{{ stats.buy }}</div>
+    <div class="stat-label">Buy</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon">🤝</div>
+    <div class="stat-value">{{ stats.partner }}</div>
+    <div class="stat-label">Partner</div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-header">
+    <div class="section-title">🎫 All Tickets</div>
+  </div>
+  <div class="table-wrap">
+    <div class="table-row header" style="grid-template-columns:1fr 1fr 80px 1fr 120px">
+      <div>User</div><div>Seller</div><div>Type</div><div>Time</div><div></div>
+    </div>
+    {% if tickets %}
+      {% for t in tickets %}
+      <div class="table-row" style="grid-template-columns:1fr 1fr 80px 1fr 120px">
+        <div>{{ t.username }}</div>
+        <div style="color:var(--text-dim)">{{ t.seller }}</div>
+        <div><span class="badge badge-{{ t.type.lower() }}">{{ t.type }}</span></div>
+        <div style="font-size:12px;color:var(--text-dim)">{{ t.time }}</div>
+        <div style="font-size:12px;color:var(--text-dim)">#{{ t.user_id }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">NO TICKETS YET</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

@@ -479,7 +479,6 @@ async def on_member_join(member: discord.Member):
     if not channel:
         return
 
-    # جيب الرسالة من DB لو اتغيرت من الداشبورد
     config = db["config"].find_one({"key": "welcome_config"}) or {}
     custom_msg = config.get("message", "We hope you have a great time.")
 
@@ -520,7 +519,6 @@ async def on_member_join(member: discord.Member):
         f"**User:** {member.mention}\n**Account Created:** <t:{int(member.created_at.timestamp())}:R>",
         color=0x57F287)
 
-    # حفظ في DB
     db["members"].update_one(
         {"user_id": member.id},
         {"$set": {"username": str(member), "joined_at": datetime.now(timezone.utc)}},
@@ -714,30 +712,37 @@ class LanguageRoleView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🇬🇧 English", style=discord.ButtonStyle.primary, custom_id="role_english")
-    async def english_button(self, button: Button, interaction: discord.Interaction):
-        await toggle_role(interaction, LANGUAGE_ROLES["English"], "English")
-
-    @discord.ui.button(label="🇸🇦 Arabic", style=discord.ButtonStyle.primary, custom_id="role_arabic")
-    async def arabic_button(self, button: Button, interaction: discord.Interaction):
-        await toggle_role(interaction, LANGUAGE_ROLES["Arabic"], "Arabic")
+    @discord.ui.select(
+        placeholder="🌍 Choose your language! | إختر لغتك!",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="English", emoji="🇬🇧", value="English"),
+            discord.SelectOption(label="Arabic",  emoji="🇸🇦", value="Arabic"),
+        ],
+        custom_id="select_language"
+    )
+    async def language_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        await toggle_role(interaction, LANGUAGE_ROLES[select.values[0]], select.values[0])
 
 
 class GameRoleView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎮 ARC Raiders", style=discord.ButtonStyle.secondary, custom_id="role_arc")
-    async def arc_button(self, button: Button, interaction: discord.Interaction):
-        await toggle_role(interaction, GAME_ROLES["ARC Raiders"], "ARC Raiders")
-
-    @discord.ui.button(label="🎮 PUBG Mobile", style=discord.ButtonStyle.secondary, custom_id="role_pubgm")
-    async def pubgm_button(self, button: Button, interaction: discord.Interaction):
-        await toggle_role(interaction, GAME_ROLES["PUBG Mobile"], "PUBG Mobile")
-
-    @discord.ui.button(label="🎮 PUBG Steam", style=discord.ButtonStyle.secondary, custom_id="role_pubgs")
-    async def pubgs_button(self, button: Button, interaction: discord.Interaction):
-        await toggle_role(interaction, GAME_ROLES["PUBG Steam"], "PUBG Steam")
+    @discord.ui.select(
+        placeholder="🎮 Choose your game! | إختر لعبتك!",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="ARC Raiders", emoji="🎯", value="ARC Raiders"),
+            discord.SelectOption(label="PUBG Mobile",  emoji="📱", value="PUBG Mobile"),
+            discord.SelectOption(label="PUBG Steam",   emoji="💻", value="PUBG Steam"),
+        ],
+        custom_id="select_game"
+    )
+    async def game_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        await toggle_role(interaction, GAME_ROLES[select.values[0]], select.values[0])
 
 
 async def toggle_role(interaction: discord.Interaction, role_id: int, role_name: str):
@@ -781,7 +786,6 @@ async def check_spam(message: discord.Message):
 
 async def check_bad_words(message: discord.Message):
     content_lower = message.content.lower()
-    # جيب القايمة من DB لو اتحدثت من الداشبورد
     config = db["config"].find_one({"key": "bad_words"})
     words  = config.get("words", BAD_WORDS) if config else BAD_WORDS
     for word in words:
@@ -947,10 +951,33 @@ async def leaderboard_setup(ctx):
 @commands.has_permissions(administrator=True)
 async def roles_panel(ctx):
     channel = bot.get_channel(SELF_ROLES_CHANNEL_ID)
-    lang_embed = discord.Embed(title="🌍 Choose Your Language", description="Click the button to get or remove a language role.", color=EMBED_COLOR)
+
+    lang_embed = discord.Embed(
+        title="Choose your Language 🌍",
+        description=(
+            "Choose your preferred language to access its channels! 🌐\n\n"
+            "!اختر لغتك المفضلة للوصول إلى قنواتها 🌐"
+        ),
+        color=EMBED_COLOR,
+        timestamp=datetime.now(timezone.utc)
+    )
+    lang_embed.set_thumbnail(url=LOGO_URL)
+    lang_embed.set_image(url=GIF_URL)
     lang_embed.set_footer(text=FOOTER_TEXT)
-    game_embed = discord.Embed(title="🎮 Choose Your Games", description="Click the buttons to get or remove game roles.", color=EMBED_COLOR)
+
+    game_embed = discord.Embed(
+        title="Choose your favourite games 🎮",
+        description=(
+            "Choose your favorite games to join their channels! 🕹\n\n"
+            "!اختر ألعابك المفضلة للانضمام إلى قنواتها 🕹"
+        ),
+        color=EMBED_COLOR,
+        timestamp=datetime.now(timezone.utc)
+    )
+    game_embed.set_thumbnail(url=LOGO_URL)
+    game_embed.set_image(url=GIF_URL)
     game_embed.set_footer(text=FOOTER_TEXT)
+
     await channel.send(embed=lang_embed, view=LanguageRoleView())
     await channel.send(embed=game_embed, view=GameRoleView())
     await ctx.respond("✅ Roles panel sent!", ephemeral=True)

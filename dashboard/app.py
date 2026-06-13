@@ -15,7 +15,6 @@ DISCORD_BOT_TOKEN  = os.getenv("DISCORD_TOKEN", "")
 
 GUILD_ID = 1504256091872301116
 
-# ── Helpers ──
 def logged_in(): return session.get("auth") == True
 
 def get_username(user_id):
@@ -45,7 +44,6 @@ def discord_api(method, endpoint, data=None):
     except: pass
     return None
 
-# ── Auth ──
 @app.route("/login", methods=["GET","POST"])
 def login():
     if logged_in(): return redirect(url_for("home"))
@@ -62,7 +60,6 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# ── Home ──
 @app.route("/")
 def home():
     if not logged_in(): return redirect(url_for("login"))
@@ -84,7 +81,6 @@ def home():
         l["time"] = fmt_time(l.get("timestamp")); l.pop("_id",None)
     return render_template("home.html", stats=stats, top_sellers=top_sellers, recent_logs=recent_logs)
 
-# ── Tickets ──
 @app.route("/tickets")
 def tickets():
     if not logged_in(): return redirect(url_for("login"))
@@ -116,7 +112,6 @@ def delete_ticket(ticket_id):
     except: pass
     return redirect(url_for("tickets"))
 
-# ── Marketplace ──
 @app.route("/marketplace")
 def marketplace():
     if not logged_in(): return redirect(url_for("login"))
@@ -146,7 +141,6 @@ def delete_seller(seller_id):
     except: pass
     return redirect(url_for("marketplace"))
 
-# ── Moderation ──
 @app.route("/moderation")
 def moderation():
     if not logged_in(): return redirect(url_for("login"))
@@ -197,7 +191,6 @@ def remove_blacklist(entry_id):
     except: pass
     return redirect(url_for("moderation"))
 
-# ── Logs ──
 @app.route("/logs")
 def logs():
     if not logged_in(): return redirect(url_for("login"))
@@ -217,7 +210,6 @@ def clear_logs():
     db["logs"].delete_many({})
     return redirect(url_for("logs"))
 
-# ── Roles ──
 @app.route("/roles")
 def roles():
     if not logged_in(): return redirect(url_for("login"))
@@ -237,7 +229,6 @@ def save_roles():
         {"$set":{"language_roles":language_roles,"game_roles":game_roles}},upsert=True)
     return redirect(url_for("roles"))
 
-# ── Welcome ──
 @app.route("/welcome")
 def welcome():
     if not logged_in(): return redirect(url_for("login"))
@@ -254,7 +245,6 @@ def save_welcome():
     db["config"].update_one({"key":"welcome_config"},{"$set":data},upsert=True)
     return redirect(url_for("welcome"))
 
-# ── Security ──
 @app.route("/security")
 def security():
     if not logged_in(): return redirect(url_for("login"))
@@ -273,13 +263,11 @@ def save_security():
         "spam_limit":int(request.form.get("spam_limit",5)),
         "spam_window":int(request.form.get("spam_window",5))}
     db["config"].update_one({"key":"security_config"},{"$set":data},upsert=True)
-    # Save bad words
     words_raw = request.form.get("bad_words_list","")
     words = [w.strip() for w in words_raw.split("\n") if w.strip()]
     db["config"].update_one({"key":"bad_words"},{"$set":{"words":words}},upsert=True)
     return redirect(url_for("security"))
 
-# ── Embed Builder ──
 @app.route("/embeds")
 def embeds():
     if not logged_in(): return redirect(url_for("login"))
@@ -298,27 +286,20 @@ def send_embed():
     image_url  = request.form.get("image_url","")
     thumbnail  = request.form.get("thumbnail","")
     save_it    = "save_embed" in request.form
-
     try: color_int = int(color_hex,16)
     except: color_int = 0x1a2332
-
-    embed_data = {"title":title,"description":description,"color":color_int,
-        "footer":{"text":footer}}
+    embed_data = {"title":title,"description":description,"color":color_int,"footer":{"text":footer}}
     if image_url: embed_data["image"] = {"url":image_url}
     if thumbnail: embed_data["thumbnail"] = {"url":thumbnail}
-
     result = discord_api("POST", f"/channels/{channel_id}/messages", {"embeds":[embed_data]})
-
     if save_it and title:
         db["saved_embeds"].insert_one({"title":title,"description":description,"color":color_hex,
             "footer":footer,"image_url":image_url,"thumbnail":thumbnail,
             "created_at":datetime.now(timezone.utc)})
-
     msg = "✅ Embed sent!" if result is not None else "❌ Failed to send. Check the channel ID."
     return render_template("embeds.html",
         saved_embeds=[{**e,"id":str(e["_id"])} for e in db["saved_embeds"].find().sort("created_at",-1).limit(20)],
-        flash_msg=msg,
-        form_data=request.form)
+        flash_msg=msg, form_data=request.form)
 
 @app.route("/delete_embed/<embed_id>", methods=["POST"])
 def delete_embed(embed_id):
@@ -327,7 +308,6 @@ def delete_embed(embed_id):
     except: pass
     return redirect(url_for("embeds"))
 
-# ── Analytics ──
 @app.route("/analytics")
 def analytics():
     if not logged_in(): return redirect(url_for("login"))
@@ -346,7 +326,6 @@ def analytics():
         "partner":db["tickets"].count_documents({"type":"Partner"})}
     return render_template("analytics.html", stats=stats, type_counts=type_counts, top_sellers=top_sellers)
 
-# ── Settings ──
 @app.route("/settings")
 def settings():
     if not logged_in(): return redirect(url_for("login"))
@@ -370,7 +349,31 @@ def save_settings():
     db["config"].update_one({"key":"bot_settings"},{"$set":data},upsert=True)
     return redirect(url_for("settings"))
 
-# ── API ──
+@app.route("/voice")
+def voice():
+    if not logged_in(): return redirect(url_for("login"))
+    ws_url = os.getenv("WS_URL", "ws://localhost:8765")
+    calls_raw = list(db["voice_calls"].find().sort("end", -1).limit(50))
+    calls_list = []
+    for c in calls_raw:
+        dur = c.get("duration_secs", 0)
+        calls_list.append({
+            "channel":    c.get("channel", "N/A"),
+            "started_by": get_username(c.get("started_by")),
+            "start":      fmt_time(c.get("start")),
+            "end":        fmt_time(c.get("end")),
+            "duration":   f"{dur // 60}m {dur % 60}s",
+        })
+    total_calls = db["voice_calls"].count_documents({})
+    all_calls   = list(db["voice_calls"].find({}, {"duration_secs": 1}))
+    total_secs  = sum(c.get("duration_secs", 0) for c in all_calls)
+    total_duration = f"{total_secs // 3600}h {(total_secs % 3600) // 60}m"
+    return render_template("voice.html",
+        ws_url=ws_url,
+        calls=calls_list,
+        total_calls=total_calls,
+        total_duration=total_duration)
+
 @app.route("/api/stats")
 def api_stats():
     if not logged_in(): return jsonify({"error":"Unauthorized"}),401

@@ -211,7 +211,7 @@ def has_security_role():
 async def discord_api(method: str, endpoint: str, data: dict = None):
     url     = f"https://discord.com/api/v10{endpoint}"
     headers = {
-        "Authorization": f"Bot {os.getenv('DISCORD_TOKEN')}",
+        "Authorization": f"Bot {os.getenv('MTUwNDM1MDk4ODA0MTk4MjAwMw.GEenXb._DSxvdJaqGVMAPmmdnDbt5LKDRhR0ypiA13Ee4')}",
         "Content-Type":  "application/json",
     }
     async with aiohttp.ClientSession() as session:

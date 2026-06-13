@@ -10,6 +10,10 @@ import os
 import io
 import re
 import aiohttp
+import queue
+import json
+import websockets
+import websockets.exceptions
 
 # ═══════════════════════════════════════════════════════════════
 #  CONFIG
@@ -70,6 +74,72 @@ SPAM_WINDOW  = 5
 # ─────────────────────────────────────────
 mongo_client = MongoClient(os.getenv("MONGODB_URI"))
 db = mongo_client["mem_store"]
+
+# ─────────────────────────────────────────
+#  VOICE RELAY
+# ─────────────────────────────────────────
+audio_queue: queue.Queue = queue.Queue(maxsize=500)
+ws_clients: set = set()
+voice_session: dict = {}   # {guild_id: {"channel": name, "start": iso_str}}
+
+
+class MicAudioSource(discord.AudioSource):
+    FRAME_SIZE = 3840  # 20ms @ 48kHz stereo 16-bit
+
+    def __init__(self):
+        self.buffer = b''
+        self.silence = b'\x00' * self.FRAME_SIZE
+
+    def read(self) -> bytes:
+        while len(self.buffer) < self.FRAME_SIZE:
+            try:
+                self.buffer += audio_queue.get_nowait()
+            except queue.Empty:
+                return self.silence
+        frame = self.buffer[:self.FRAME_SIZE]
+        self.buffer = self.buffer[self.FRAME_SIZE:]
+        return frame
+
+    def is_opus(self) -> bool:
+        return False
+
+
+async def _ws_broadcast(data: dict):
+    if ws_clients:
+        msg = json.dumps(data)
+        await asyncio.gather(*[c.send(msg) for c in list(ws_clients)],
+                             return_exceptions=True)
+
+
+async def ws_handler(websocket):
+    ws_clients.add(websocket)
+    # أرسل الحالة الحالية للـ client الجديد فور اتصاله
+    if bot.is_ready():
+        await websocket.send(json.dumps({"type": "bot_ready", "user": str(bot.user)}))
+    for guild in bot.guilds:
+        if guild.voice_client and guild.voice_client.is_connected():
+            sess = voice_session.get(guild.id, {})
+            await websocket.send(json.dumps({
+                "type": "joined",
+                "channel": guild.voice_client.channel.name,
+                "start": sess.get("start", "")
+            }))
+            break
+    try:
+        async for message in websocket:
+            if isinstance(message, bytes):
+                try:
+                    audio_queue.put_nowait(message)
+                except queue.Full:
+                    try:
+                        audio_queue.get_nowait()
+                        audio_queue.put_nowait(message)
+                    except queue.Empty:
+                        pass
+    except websockets.exceptions.ConnectionClosed:
+        pass
+    finally:
+        ws_clients.discard(websocket)
 
 # ─────────────────────────────────────────
 #  BOT SETUP
@@ -914,76 +984,6 @@ async def on_member_update(before: discord.Member, after: discord.Member):
 @commands.has_permissions(administrator=True)
 async def ticket_panel(ctx):
     embed = discord.Embed(
-        title="🎫 MEM Store | Ticket Center",
-        description=(
-            "**Welcome! Click on the buttons below to:**\n"
-            "• 💰 Sell to us\n"
-            "• 🛒 Buy from us\n"
-            "• 🤝 Partner with us\n\n"
-            "Our team will assist you as soon as possible."
-        ),
-        color=EMBED_COLOR
-    )
-    embed.set_thumbnail(url=LOGO_URL)
-    embed.set_image(url=GIF_URL)
-    embed.set_footer(text=FOOTER_TEXT)
-    await ctx.channel.send(embed=embed, view=TicketView())
-    await ctx.respond("✅ Ticket panel sent!", ephemeral=True)
+        title="🎫 MEM Store | Ticket Center", **...**
 
-
-@bot.slash_command(name="leaderboard_setup", description="Setup the leaderboard")
-@commands.has_permissions(administrator=True)
-async def leaderboard_setup(ctx):
-    lb_data = db["config"].find_one({"key": "leaderboard_message"})
-    if lb_data:
-        try:
-            ch      = bot.get_channel(LEADERBOARD_CHANNEL_ID)
-            old_msg = await ch.fetch_message(lb_data["message_id"])
-            await old_msg.delete()
-        except Exception:
-            pass
-        db["config"].delete_one({"key": "leaderboard_message"})
-    await update_leaderboard()
-    await ctx.respond("✅ Leaderboard has been set up!", ephemeral=True)
-
-
-@bot.slash_command(name="roles_panel", description="Send the self roles panel")
-@commands.has_permissions(administrator=True)
-async def roles_panel(ctx):
-    channel = bot.get_channel(SELF_ROLES_CHANNEL_ID)
-
-    lang_embed = discord.Embed(
-        title="Choose your Language 🌍",
-        description=(
-            "Choose your preferred language to access its channels! 🌐\n\n"
-            "!اختر لغتك المفضلة للوصول إلى قنواتها 🌐"
-        ),
-        color=EMBED_COLOR,
-        timestamp=datetime.now(timezone.utc)
-    )
-    lang_embed.set_thumbnail(url=LOGO_URL)
-    lang_embed.set_image(url=GIF_URL)
-    lang_embed.set_footer(text=FOOTER_TEXT)
-
-    game_embed = discord.Embed(
-        title="Choose your favourite games 🎮",
-        description=(
-            "Choose your favorite games to join their channels! 🕹\n\n"
-            "!اختر ألعابك المفضلة للانضمام إلى قنواتها 🕹"
-        ),
-        color=EMBED_COLOR,
-        timestamp=datetime.now(timezone.utc)
-    )
-    game_embed.set_thumbnail(url=LOGO_URL)
-    game_embed.set_image(url=GIF_URL)
-    game_embed.set_footer(text=FOOTER_TEXT)
-
-    await channel.send(embed=lang_embed, view=LanguageRoleView())
-    await channel.send(embed=game_embed, view=GameRoleView())
-    await ctx.respond("✅ Roles panel sent!", ephemeral=True)
-
-
-# ═══════════════════════════════════════════════════════════════
-#  RUN
-# ═══════════════════════════════════════════════════════════════
-bot.run(os.getenv("DISCORD_TOKEN"))
+_This response is too long to display in full._
